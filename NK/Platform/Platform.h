@@ -17,10 +17,14 @@ void PrintLiteral(const char *Literal);
 
 void Exit(int Code);
 
-/*
-#define CopyMemory(dst, src, size) memcpy((u8 *)(dst), (u8 *)(src), (size))
-#define MoveMemory(dst, src, size) memmove((u8 *)(dst), (u8 *)(src), (size))
-#define SetMemory(dst, byte, size) memset((u8 *)(dst), (u8 *)(byte), (size))
-#define CompareMemory(a, b, size) memcmp((u8 *)(a), (b), (size))
-#define ZeroMemory(s, z) memset((s), 0, (z))
-*/
+// Defined in Platform.cpp - not really OS specific
+void _CopyMemory(u8 *Dest, u8 *Source, u64 Size);
+void _MoveMemory(u8 *Dest, u8 *Source, u64 Size);
+void _SetMemory(u8 *Pointer, u8 Byte, u64 Size);
+int _CompareMemory(u8 *A, u8 *B, u64 Size);
+
+#define CopyMemory(Dest, Source, Size) _CopyMemory((u8 *)(Dest), (u8 *)(Source), (Size))
+#define MoveMemory(Dest, Source, Size) _MoveMemory((u8 *)(Dest), (u8 *)(Source), (Size))
+#define SetMemory(Pointer, Byte, Size) _SetMemory((u8 *)(Pointer), (u8)(Byte), (Size))
+#define CompareMemory(A, B, Size) _CompareMemory((u8 *)(A), (u8 *)(B), (Size))
+#define ZeroMemory(Pointer, Size) _SetMemory((u8 *)(Pointer), 0, (Size))

@@ -54,8 +54,8 @@ TestGroup __Group = {};
     {                                                                                              \
         do {                                                                                       \
             Test *__T = &__Group.Tests[__Group.Count - 1];                                         \
-            __T->Results[__t->Count] = Condition;                                                  \
-            __T->Exprs[__t->Count] = #Condition;                                                   \
+            __T->Results[__T->Count] = Condition;                                                  \
+            __T->Exprs[__T->Count] = #Condition;                                                   \
             __T->Count++;                                                                          \
             if (__T->Count >= MAX_ASSERTS_PER_TEST) {                                              \
                 Print("Ran out of max asserts per test: %s:%d", __FILE__, __LINE__);               \

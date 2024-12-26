@@ -8,6 +8,7 @@
 
 #if OS_WINDOWS
 #include "Platform/PlatformWindows.cpp"
+#include "Platform/Platform.cpp"
 #else
 #error Unsupported platform layer.
 #endif

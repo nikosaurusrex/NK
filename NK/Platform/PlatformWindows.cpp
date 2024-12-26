@@ -61,6 +61,7 @@ void Print(const char *Format, ...) {
         va_end(Args);
 
         if (Needed <= 0) {
+            return;
         }
 
         char *Buffer = (char *) HeapAlloc(Needed + 1);
