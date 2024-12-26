@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+.clangd
+Tests.ilk
+Tests.pdb
