@@ -24,7 +24,11 @@ void *memset(void *Pointer, int Byte, size_t Size) {
     return Pointer;
 }
 
-void _MoveMemory(u8 *Dest, u8 *Source, u64 Size) {
+#pragma function(memmove)
+void *memmove(void *_Dest, const void *_Source, size_t Size) {
+    u8 *Dest = (u8 *)_Dest;
+    u8 *Source = (u8 *)_Source;
+
     if (Dest < Source) {
         __asm__ volatile (
             "rep movsb"
@@ -42,6 +46,7 @@ void _MoveMemory(u8 *Dest, u8 *Source, u64 Size) {
             : "memory"
         );
     }
+    return Dest;
 }
 
 int _CompareMemory(u8 *A, u8 *B, u64 Size) {
@@ -85,7 +90,8 @@ void *memset(void *Pointer, int Byte, size_t Size) {
     return Pointer;
 }
 
-void _MoveMemory(u8 *Dest, u8 *Source, u64 Size) {
+#pragma function(memmove)
+void *memmove(void *Dest, const void *Source, size_t Size) {
     if (Dest < Source) {
         for (u64 i = 0; i < Size; i++) {
             Dest[i] = Source[i];
@@ -95,6 +101,8 @@ void _MoveMemory(u8 *Dest, u8 *Source, u64 Size) {
             Dest[i - 1] = Source[i - 1];
         }
     }
+
+    return Dest;
 }
 
 int _CompareMemory(u8 *A, u8 *B, u64 Size) {
@@ -118,4 +126,8 @@ void _CopyMemory(u8 *Dest, u8 *Source, u64 Size) {
 
 void _SetMemory(u8 *Pointer, u8 Byte, u64 Size) {
     memset(Pointer, Byte, Size);
+}
+
+void _MoveMemory(u8 *Dest, u8 *Source, u64 Size) {
+    memmove(Dest, Source, Size);
 }

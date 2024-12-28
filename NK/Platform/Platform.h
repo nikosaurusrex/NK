@@ -4,8 +4,14 @@
 
 #include "../General.h"
 
+b32 EnableLargePages();
+u64 GetPageSize();
+u64 GetLargePageSize();
+
 void *ReserveMemory(u64 Size);
 b32 CommitMemory(void *Pointer, u64 Size);
+void *ReserveMemoryLarge(u64 Size);
+void *ReserveMemoryLargeIfPossible(u64 Size);
 void DecommitMemory(void *Pointer, u64 Size);
 void ReleaseMemory(void *Pointer, u64 Size);
 
