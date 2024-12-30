@@ -131,3 +131,65 @@ void _SetMemory(u8 *Pointer, u8 Byte, u64 Size) {
 void _MoveMemory(u8 *Dest, u8 *Source, u64 Size) {
     memmove(Dest, Source, Size);
 }
+
+String ReadFile(String Path) {
+    OS_Handle Handle = OpenFile(Path, OS_READ | OS_SHARED);
+
+    if (!IsValidFile(Handle)) {
+        return (String){0, 0};
+    }
+
+    OS_FileInfo FileInfo = GetFileInfo(Handle);
+    void *Memory = HeapAlloc(FileInfo.Size + 1);
+    String contents = ReadHandle(Handle, FileInfo.Size, Memory);
+    CloseFile(Handle);
+
+    return contents;
+}
+
+internal void RunTaskQueue(void *Args) {
+    TaskQueue *Queue = (TaskQueue *) Args;
+
+    while (!Queue->Canceled) {
+        u32 CurrentIndex = Queue->DequeueIndex;
+        u32 NextIndex = (Queue->DequeueIndex + 1) % ArrayCount(Queue->Tasks);
+        if (CurrentIndex != Queue->EnqueueIndex) {
+            u32 Index = AtomicCompareExchange(&Queue->DequeueIndex, NextIndex, CurrentIndex);
+
+            if (Index == CurrentIndex) {
+                Task ToExecute = Queue->Tasks[Index];
+                ToExecute.Function(Queue, ToExecute.Pointer);
+            }
+        } else {
+            TakeSemaphore(Queue->Semaphore);
+        }
+    }
+}
+
+void CreateTaskQueue(TaskQueue *Queue, u32 ThreadCount) {
+    Queue->Semaphore = CreateSemaphore(0, ThreadCount);
+    Queue->EnqueueIndex = 0;
+    Queue->DequeueIndex = 0;
+    Queue->Canceled = false;
+
+    for (u32 i = 0; i < ThreadCount; ++i) {
+        StartThread(RunTaskQueue, Queue);
+    }
+}
+
+void EnqueueTask(TaskQueue *Queue, TaskFunc Function, void *Pointer) {
+    u32 Index = (Queue->EnqueueIndex + 1) % ArrayCount(Queue->Tasks);
+
+    Task *New = Queue->Tasks + Index;
+    New->Function = Function;
+    New->Pointer = Pointer;
+
+    // TODO: Write barrier
+    Queue->EnqueueIndex = Index;
+
+    DropSemaphore(Queue->Semaphore);
+}
+
+void CancelTaskQueue(TaskQueue *Queue) {
+    Queue->Canceled = true;
+}
