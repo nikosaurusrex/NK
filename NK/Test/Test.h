@@ -49,13 +49,15 @@ TestGroup __Group = {};
         }                                                                                          \
     }
 
+#undef _Assert
 #undef Assert
-#define Assert(Condition)                                                                          \
+#undef AssertFloat
+#define _Assert(Condition, CondString)                                                             \
     {                                                                                              \
         do {                                                                                       \
             Test *__T = &__Group.Tests[__Group.Count - 1];                                         \
             __T->Results[__T->Count] = Condition;                                                  \
-            __T->Exprs[__T->Count] = #Condition;                                                   \
+            __T->Exprs[__T->Count] = CondString;                                                   \
             __T->Count++;                                                                          \
             if (__T->Count >= MAX_ASSERTS_PER_TEST) {                                              \
                 Print("Ran out of max asserts per test: %s:%d", __FILE__, __LINE__);               \
@@ -63,6 +65,8 @@ TestGroup __Group = {};
             }                                                                                      \
         } while (0);                                                                               \
     }
+#define Assert(Condition) _Assert(Condition, #Condition)
+#define AssertFloat(A, B) _Assert(AbsoluteValue(A - B) <= 1e-3, #A " == " #B);
 
 extern const char *__Tag;
 extern void __Func();

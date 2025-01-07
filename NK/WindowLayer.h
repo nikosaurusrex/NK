@@ -1,14 +1,13 @@
 #pragma once
 
 #include "Platform/PlatformContext.h"
-
-#include "Platform/Platform.h"
+#include "Window/Window.h"
 
 #ifdef NK_IMPLEMENTATION
 
 #if OS_WINDOWS
-#include "Platform/PlatformWindows.cpp"
-#include "Platform/Platform.cpp"
+#include "Window/WindowWindows.cpp"
+#include "Window/Window.cpp"
 #else
 #error Unsupported platform layer.
 #endif

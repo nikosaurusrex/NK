@@ -119,7 +119,16 @@ typedef unsigned int uint;
 #define ASAN_UNPOISON_MEMORY_REGION(addr, size) ((void) (addr), (void) (size))
 #endif
 
-readonly global float pi32 = 3.1415926535897f;
+#if COMPILER_CLANG
+#define IGNORE_WARNINGS_BEGIN _Pragma("clang diagnostic push") \
+                              _Pragma("clang diagnostic ignored \"-Weverything\"")
+#define IGNORE_WARNINGS_END   _Pragma("clang diagnostic pop")
+#else
+#define IGNORE_WARNINGS_BEGIN
+#define IGNORE_WARNINGS_END
+#endif
+
+readonly global float PI32 = 3.1415926535897f;
 
 readonly global u64 MaxU64 = 0xffffffffffffffffull;
 readonly global u32 MaxU32 = 0xffffffff;
@@ -135,3 +144,6 @@ readonly global s64 MinS64 = (s64) 0xffffffffffffffffull;
 readonly global s32 MinS32 = (s32) 0xffffffff;
 readonly global s16 MinS16 = (s16) 0xffff;
 readonly global s8 MinS8 = (s8) 0xff;
+
+readonly global float FloatMax = 3.4028235e+38f;
+readonly global float FloatMin = -3.4028235e+38f;
