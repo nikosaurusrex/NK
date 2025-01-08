@@ -1,29 +1,95 @@
+#pragma comment (lib, "Gdi32")
+
+// TODO: somehow not do on Vulkan
+#pragma comment (lib, "OpenGL32")
+
 global HCURSOR CursorHandles[2]; // 0 - arrow, 1 - hand
+global InputState Input;
 
 static LRESULT CALLBACK WindowProc(HWND Handle, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    WindowState *State = (WindowState *) GetWindowLongPtr(Handle, GWLP_USERDATA);
+    LRESULT Result = 0;
+
+    Window *Win = (Window *) GetWindowLongPtr(Handle, GWLP_USERDATA);
 
     switch (uMsg) {
-        case WM_CLOSE: {
-            Assert(State);
-            State->Running = 0;
+        case WM_DESTROY: {
+            Win->Running = 0;
             return 0;
         } break;
         case WM_SIZE: {
-            Assert(State);
+            Win->Resized = 1;
+        } break;
+        case WM_CHAR: {
+            WCHAR UTF16Char = (WCHAR)wParam;
+            char ASCIIChar;
+            int ASCIICharLength = WideCharToMultiByte(CP_ACP, 0, &UTF16Char, 1, &ASCIIChar, 1, 0, 0);
+            if (ASCIICharLength == 1 && Input.TextLength + 1 < sizeof(Input.Text) - 1) {
+                Input.Text[Input.TextLength] = ASCIIChar;
+                Input.Text[Input.TextLength + 1] = 0;
+                Input.TextLength++;
+            }
+        } break;
+        case WM_INPUT: {
+            RAWINPUT Raw;
+            UINT Size = sizeof(Raw);
+            if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, (LPVOID) &Raw, &Size, sizeof(RAWINPUTHEADER)) == Size) {
+                if (Raw.header.dwType == RIM_TYPEMOUSE) {
+                    if (!(Raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
+                        Input.MouseDeltaPosition.X += Raw.data.mouse.lLastX;
+                        Input.MouseDeltaPosition.Y += Raw.data.mouse.lLastY;
+                    }
 
-            int Width = LOWORD(lParam);
-            int Height = HIWORD(lParam);
+                    if (Raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) {
+                        SHORT WheelDelta = (SHORT)Raw.data.mouse.usButtonData;
+                        int ScrollSteps = WheelDelta / 120;
+                        Input.DeltaScroll += ScrollSteps;
+                        Input.Scroll += ScrollSteps;
+                    }
 
-            State->Width = Width;
-            State->Height = Height;
+                    if (Raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) {
+                        Input.LeftButton.Pressed = 1;
+                        Input.LeftButton.Down = 1;
+                    }
+                    if (Raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP) {
+                        Input.LeftButton.Released = 1;
+                        Input.LeftButton.Down = 0;
+                    }
+
+                    if (Raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN) {
+                        Input.RightButton.Pressed = 1;
+                        Input.RightButton.Down = 1;
+                    }
+                    if (Raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP) {
+                        Input.RightButton.Released = 1;
+                        Input.RightButton.Down = 0;
+                    }
+                }
+            }
+            Result = DefWindowProc(Handle, uMsg, wParam, lParam);
+        } break;
+        default: {
+            Result = DefWindowProc(Handle, uMsg, wParam, lParam);
         } break;
     }
 
-    return DefWindowProc(Handle, uMsg, wParam, lParam);
+    return Result;
 }
 
-b8 InitWindow(WindowState *State, const char *Title, int Width, int Height) {
+b8 InitWindow(Window *Win) {
+    if (!Win->Title) Win->Title = "Window";
+
+    int PosX = Win->Position.X;
+    if (!PosX) PosX = CW_USEDEFAULT;
+
+    int PosY = Win->Position.Y;
+    if (!PosY) PosY = CW_USEDEFAULT;
+
+    int Width = Win->Size.X;
+    if (!Width) Width = CW_USEDEFAULT;
+
+    int Height = Win->Size.Y;
+    if (!Height) Height = CW_USEDEFAULT;
+
     CursorHandles[0] = LoadCursor(0, IDC_ARROW);
     CursorHandles[1] = LoadCursor(0, IDC_HAND);
 
@@ -33,24 +99,34 @@ b8 InitWindow(WindowState *State, const char *Title, int Width, int Height) {
     WindowClass.hInstance = GetModuleHandle(0);
     WindowClass.hCursor = CursorHandles[0];
     WindowClass.lpszClassName = "PlatformWindowClass";
-    WindowClass.style = CS_OWNDC;
+
+    if (Win->OpenGL) {
+        WindowClass.style = CS_HREDRAW | CS_VREDRAW;
+    } else {
+        WindowClass.style = CS_OWNDC;
+    }
 
     if (!RegisterClassExA(&WindowClass)) {
-        LogError("RegisterClassExA failed.");
+        Print("RegisterClassExA failed.\n");
         return 0;
     }
 
-    RECT Rect = {0, 0, Width, Height};
-    AdjustWindowRect(&Rect, WS_OVERLAPPEDWINDOW, FALSE);
+    if (Width != CW_USEDEFAULT && Height != CW_USEDEFAULT) {
+        RECT Rect = {0, 0, Width, Height};
+        if (AdjustWindowRect(&Rect, WS_OVERLAPPEDWINDOW, FALSE)) {
+            Width = Rect.right - Rect.left;
+            Height = Rect.bottom - Rect.top;
+        }
+    }
 
     HWND Handle = CreateWindowExA(0,
-                                Rect.lpszClassName,
-                                Title,
+                                WindowClass.lpszClassName,
+                                Win->Title,
                                 WS_OVERLAPPEDWINDOW,
-                                CW_USEDEFAULT,
-                                CW_USEDEFAULT,
-                                Rect.right - Rect.left,
-                                Rect.bottom - Rect.top,
+                                PosX,
+                                PosY,
+                                Width,
+                                Height,
                                 0,
                                 0,
                                 WindowClass.hInstance,
@@ -61,21 +137,26 @@ b8 InitWindow(WindowState *State, const char *Title, int Width, int Height) {
         return 0;
     }
 
-    SetWindowLongPtr(Handle, GWLP_USERDATA, (LONG_PTR) State);
+    SetWindowLongPtr(Handle, GWLP_USERDATA, (LONG_PTR) Win);
 
+    // Setup OpenGL/Vulkan support
     HDC DeviceContext = GetDC(Handle);
 
-    // TODO: check vulkan double buffer, swap buffers etc
     PIXELFORMATDESCRIPTOR PixelFormat = {};
     PixelFormat.nSize = sizeof(PixelFormat);
     PixelFormat.nVersion = 1;
-    PixelFormat.dwFlags = PFD_DRAW_TO_WINDOW;
     PixelFormat.iPixelType = PFD_TYPE_RGBA;
     PixelFormat.cColorBits = 32;
     PixelFormat.cAlphaBits = 8;
     PixelFormat.cDepthBits = 24;
     PixelFormat.cStencilBits = 8;
     PixelFormat.iLayerType = PFD_MAIN_PLANE;
+
+    if (Win->OpenGL) {
+        PixelFormat.dwFlags = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER;
+    } else {
+        PixelFormat.dwFlags = PFD_DRAW_TO_WINDOW;
+    }
 
     int Format = ChoosePixelFormat(DeviceContext, &PixelFormat);
     if (!Format) {
@@ -85,41 +166,60 @@ b8 InitWindow(WindowState *State, const char *Title, int Width, int Height) {
 
     SetPixelFormat(DeviceContext, Format, &PixelFormat);
 
+    if (Win->OpenGL) {
+        Win->WGLContext = wglCreateContext(DeviceContext);
+        wglMakeCurrent(DeviceContext, Win->WGLContext);
+    }
+
+    // Setup Raw Mouse Input
+    RAWINPUTDEVICE RawInputDevice = {};
+    RawInputDevice.usUsagePage = 0x01;
+    RawInputDevice.usUsage = 0x02;
+    RawInputDevice.hwndTarget = Handle;
+    
+    if (!RegisterRawInputDevices(&RawInputDevice, 1, sizeof(RawInputDevice))) {
+        Print("Failed to register mouse raw input\n");
+        return 0;
+    }
+
+    // Show Window
     ShowWindow(Handle, SW_SHOW);
     UpdateWindow(Handle);
 
-    State->Handle = Handle;
-    State->DeviceContext = DeviceContext;
-    State->Running = 1;
-    State->Style = WS_OVERLAPPEDWINDOW;
+    Win->Handle = Handle;
+    Win->DeviceContext = DeviceContext;
+    Win->Running = 1;
+    Win->Style = WS_OVERLAPPEDWINDOW;
 
     return 1;
 }
 
-void DestroyWindow(WindowState *State) {
-    ReleaseDC(State->Handle, state->DeviceContext);
-    DestroyWindow(State->Handle);
+void DestroyWindow(Window *Win) {
+    if (Win->OpenGL) {
+        wglMakeCurrent(0, 0);
+        wglDeleteContext(Win->WGLContext);
+    }
+    ReleaseDC(Win->Handle, Win->DeviceContext);
+    DestroyWindow(Win->Handle);
 }
 
-void UpdateWindow(WindowState *State) {
-    UpdateInput();
+void UpdateWindow(Window *Win) {
+    if (Win->OpenGL) {
+        SwapBuffers(Win->DeviceContext);
+    }
+
+    Win->Resized = 0;
+
+    Input.MouseDeltaPosition.X = 0;
+    Input.MouseDeltaPosition.Y = 0;
+    Input.DeltaScroll = 0;
+
+    Input.Text[0] = 0;
+    Input.TextLength = 0;
 
     MSG Message;
     while (PeekMessage(&Message, 0, 0, 0, PM_REMOVE)) {
         switch (Message.message) {
-            case WM_SYSKEYUP:
-            case WM_SYSKEYDOWN:
-            case WM_KEYUP:
-            case WM_KEYDOWN: {
-                u32 KeyCode = u32(Message.wParam);
-                bool WasDown = (Message.lParam & (1 << 30)) != 0;
-                bool IsDown = (Message.lParam & (1 << 31)) == 0;
-
-                UpdateKeyInput(KeyCode, IsDown, WasDown);
-            } break;
-            case WM_MOUSEWHEEL: {
-                UpdateScroll(GET_WHEEL_DELTA_WPARAM(Message.wParam));
-            } break;
             default: {
                 TranslateMessage(&Message);
                 DispatchMessage(&Message);
@@ -127,34 +227,59 @@ void UpdateWindow(WindowState *State) {
         }
     }
 
-    POINT CursorPos;
-    GetCursorPos(&CursorPos);
-    ScreenToClient(State->Handle, &CursorPos);
+    // Window Info
+    RECT ClientRect;
+    GetClientRect(Win->Handle, &ClientRect);
 
-    UpdateCursorPos(float(CursorPos.x), float(CursorPos.y));
+    Win->Size.X = ClientRect.right - ClientRect.left;
+    Win->Size.Y = ClientRect.bottom - ClientRect.top;
 
-    bool LeftButtonDown = GetKeyState(VK_LBUTTON) & (1 << 15);
-    bool RightButtonDown = GetKeyState(VK_RBUTTON) & (1 << 15);
+    POINT WindowPos = {ClientRect.left, ClientRect.top};
+    ClientToScreen(Win->Handle, &WindowPos);
 
-    UpdateButtonState(LeftButtonDown, RightButtonDown);
+    Win->Position.X = WindowPos.x;
+    Win->Position.Y = WindowPos.y;
+
+    // Keyboard Input
+    BYTE KeyStates[256];
+    GetKeyboardState(KeyStates);
+    for (int i = 5; i < Min(256, WIN_MAX_KEYS); ++i) {
+        ButtonInput *Button = Input.Keys + i;
+
+        b8 Down = KeyStates[i] >> 7;
+        b8 WasDown = Button->Down;
+
+        Button->Down = Down;
+        Button->Pressed = !WasDown && Down;
+        Button->Released = WasDown && !Down;
+    }
+
+    // Mouse Input
+    POINT MousePosition;
+    GetCursorPos(&MousePosition);
+    MousePosition.x -= Win->Position.X;
+    MousePosition.y -= Win->Position.Y;
+
+    Input.MousePosition.X = MousePosition.x;
+    Input.MousePosition.Y = MousePosition.y;
 }
 
-void ToggleFullscreen(WindowState *State) {
-    State->Fullscreen = !State->Fullscreen;
+void ToggleFullscreen(Window *Win) {
+    Win->Fullscreen = !Win->Fullscreen;
 
-    if (State->Fullscreen) {
-        GetWindowRect(State->Handle, &State->Rect);
-        State->Style = GetWindowLong(State->Handle, GWL_STYLE);
+    if (Win->Fullscreen) {
+        GetWindowRect(Win->Handle, &Win->Rect);
+        Win->Style = GetWindowLong(Win->Handle, GWL_STYLE);
 
         SetWindowLong(
-            State->Handle, GWL_STYLE, State->Style & ~(WS_CAPTION | WS_THICKFRAME));
+            Win->Handle, GWL_STYLE, Win->Style & ~(WS_CAPTION | WS_THICKFRAME));
 
         MONITORINFO MonitorInfo = {};
         MonitorInfo.cbSize = sizeof(MONITORINFO);
 
-        GetMonitorInfo(MonitorFromWindow(State->Handle, MONITOR_DEFAULTTOPRIMARY), &MonitorInfo);
+        GetMonitorInfo(MonitorFromWindow(Win->Handle, MONITOR_DEFAULTTOPRIMARY), &MonitorInfo);
 
-        SetWindowPos(State->Handle,
+        SetWindowPos(Win->Handle,
                      HWND_TOP,
                      MonitorInfo.rcMonitor.left,
                      MonitorInfo.rcMonitor.top,
@@ -162,19 +287,19 @@ void ToggleFullscreen(WindowState *State) {
                      MonitorInfo.rcMonitor.bottom - MonitorInfo.rcMonitor.top,
                      SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
     } else {
-        SetWindowLong(State->Handle, GWL_STYLE, State->Style);
-        SetWindowPos(State->Handle,
+        SetWindowLong(Win->Handle, GWL_STYLE, Win->Style);
+        SetWindowPos(Win->Handle,
                      NULL,
-                     State->Rect.left,
-                     State->Rect.top,
-                     State->Rect.right - State->Rect.left,
-                     State->Rect.bottom - State->Rect.top,
+                     Win->Rect.left,
+                     Win->Rect.top,
+                     Win->Rect.right - Win->Rect.left,
+                     Win->Rect.bottom - Win->Rect.top,
                      SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
     }
 }
 
-void SetWindowTitle(WindowState *State, const char *Title) {
-    SetWindowTextA(State->Handle, Title);
+void SetWindowTitle(Window *Win, const char *Title) {
+    SetWindowTextA(Win->Handle, Title);
 }
 
 void SetCursorToArrow() {
@@ -183,4 +308,37 @@ void SetCursorToArrow() {
 
 void SetCursorToPointer() {
     SetCursor(CursorHandles[1]);
+}
+
+char *GetTextInput(int *Length) {
+    *Length = Input.TextLength;
+    return Input.Text;
+}
+
+b8 IsKeyDown(u32 Key) {
+    return Input.Keys[Key].Down;
+}
+
+b8 WasKeyPressed(u32 Key) {
+    return Input.Keys[Key].Pressed;
+}
+
+b8 WasKeyReleased(u32 Key) {
+    return Input.Keys[Key].Released;
+}
+
+Int2 GetMousePosition() {
+    return Input.MousePosition;
+}
+
+Int2 GetMouseDeltaPosition() {
+    return Input.MouseDeltaPosition;
+}
+
+int GetMouseScroll() {
+    return Input.Scroll;
+}
+
+int GetMouseScrollDelta() {
+    return Input.DeltaScroll;
 }

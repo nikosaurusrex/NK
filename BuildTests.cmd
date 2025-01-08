@@ -15,3 +15,4 @@ set BUILD_MODE=%DEBUG_FLAGS%
 set INCLUDES=-I./
 
 clang++ %BUILD_MODE% %CFLAGS% %INCLUDES% NKTests/Tests.cpp -o Tests.exe
+clang++ %BUILD_MODE% %CFLAGS% %INCLUDES% NKTests/WindowTest.cpp -o WindowTest.exe

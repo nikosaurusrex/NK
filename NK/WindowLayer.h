@@ -7,7 +7,6 @@
 
 #if OS_WINDOWS
 #include "Window/WindowWindows.cpp"
-#include "Window/Window.cpp"
 #else
 #error Unsupported platform layer.
 #endif

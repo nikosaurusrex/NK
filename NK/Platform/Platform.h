@@ -109,3 +109,9 @@ String ReadFile(String Path);
 void CreateTaskQueue(TaskQueue *Queue, u32 ThreadCount);
 void EnqueueTask(TaskQueue *Queue, TaskFunc Function, void *Pointer);
 void CancelTaskQueue(TaskQueue *Queue);
+
+void LogFatal(const char *fmt, ...);
+void LogError(const char *fmt, ...);
+void LogWarning(const char *fmt, ...);
+void LogInfo(const char *fmt, ...);
+void LogDebug(const char *fmt, ...);
