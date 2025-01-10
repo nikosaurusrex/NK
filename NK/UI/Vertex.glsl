@@ -3,12 +3,14 @@
 #extension GL_ARB_explicit_uniform_location : enable
 
 struct UIRenderCommand {
-    vec2 Position;
-    vec2 Size;
+    float Px, Py;
+    float Sx, Sy;
     uint Color;
     float Rounding;
     uint Border;
     uint Type;
+    float UVx, UVy;
+    float UVw, UVh;
 };
 
 flat out vec3 PassColor;
@@ -18,6 +20,7 @@ out vec2 PassRectHalfSize;
 flat out float PassRounding;
 flat out float PassBorder;
 flat out uint PassType;
+out vec2 PassUVCoords;
 
 layout(std140) uniform RenderCommands {
     UIRenderCommand Commands[512];
@@ -26,6 +29,15 @@ layout(std140) uniform RenderCommands {
 layout(location=1) uniform vec2 WindowSize;
 
 const vec2 VertexPositions[] = vec2[](
+    vec2(0, 1),
+    vec2(0, 0),
+    vec2(1, 0),
+    vec2(0, 1),
+    vec2(1, 0),
+    vec2(1, 1)
+);
+
+const vec2 UVPositions[] = vec2[](
     vec2(0, 1),
     vec2(0, 0),
     vec2(1, 0),
@@ -47,8 +59,12 @@ void main() {
 
     uint VertexIndex = gl_VertexID % 6;
     vec2 VertexPosition = VertexPositions[VertexIndex];
+    vec2 UVPosition = UVPositions[VertexIndex];
+
+    vec2 Pos = vec2(Command.Px, Command.Py);
+    vec2 Size = vec2(Command.Sx, Command.Sy);
     
-    vec2 Position = fma(VertexPosition, Command.Size, Command.Position);
+    vec2 Position = fma(VertexPosition, Size, Pos);
     vec2 WindowPosition = vec2(
         (Position.x / WindowSize.x) * 2.0 - 1.0,
         1.0 - (Position.y / WindowSize.y) * 2.0
@@ -56,11 +72,16 @@ void main() {
 
     gl_Position = vec4(WindowPosition, 0.0, 1.0);
 
+    vec2 UVPos = vec2(Command.UVx, Command.UVy);
+    vec2 UVSize = vec2(Command.UVw, Command.UVh);
+    vec2 UVCoords = fma(UVPosition, UVSize, UVPos);
+
     PassColor = UnpackColor(Command.Color);
     PassBorderColor = UnpackColor(Command.Border);
-    PassRectCenter = vec2(VertexPosition - 0.5) * Command.Size;
-    PassRectHalfSize = Command.Size * 0.5;
+    PassRectCenter = vec2(VertexPosition - 0.5) * Size;
+    PassRectHalfSize = Size * 0.5;
     PassRounding = Command.Rounding;
     PassBorder = float((Command.Border >> 24) & 0xFFu);
     PassType = Command.Type;
+    PassUVCoords = UVCoords;
 }

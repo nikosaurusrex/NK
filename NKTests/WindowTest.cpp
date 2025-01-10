@@ -20,15 +20,15 @@ void NKMain() {
 
     InitUI();
 
+    glClearColor(0.2, 0.3, 0.1, 1.0);
+
     while (MainWindow.Running) {
         UpdateWindow(&MainWindow);
 
         BeginUIFrame(&MainWindow);
 
-        PushRectangle(Vec2(100.f, 100.f), Vec2(200.f, 100.f), 0xFFFF00, 0.f, 0);
-        PushRectangle(Vec2(100.f, 300.f), Vec2(200.f, 100.f), 0xFF0000, 15.f, 0);
-        PushRectangle(Vec2(500.f, 100.f), Vec2(200.f, 100.f), 0xFF0FF, 0.f, 0x05FF0000);
-        PushRectangle(Vec2(500.f, 300.f), Vec2(200.f, 100.f), 0xFF0FF, 5.f, 0x0A00FF00);
+        if (UIButton("Exit", Vec2(200.f, 200.f), Vec2(100.f, 50.f))) {
+        }
 
         EndUIFrame();
     }

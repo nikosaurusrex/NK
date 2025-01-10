@@ -207,6 +207,8 @@ void DestroyWindow(Window *Win) {
 void UpdateWindow(Window *Win) {
     if (Win->OpenGL) {
         SwapBuffers(Win->DeviceContext);
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
 
     Win->Resized = 0;
