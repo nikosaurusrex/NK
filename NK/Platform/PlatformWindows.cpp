@@ -83,12 +83,13 @@ void *ReserveMemoryLarge(u64 Size) {
 void *ReserveMemoryLargeIfPossible(u64 Size) {
     void *Result = 0;
 
+    /*
     if (PlatformState.LargePagesEnabled) {
         Result = ReserveMemoryLarge(Size);
-    } else {
+    } else {*/
         Result = ReserveMemory(Size);
         CommitMemory(Result, Size);
-    }
+    // }
 
     return Result;
 }

@@ -17,7 +17,7 @@ struct UIRenderCommand {
         };
         // Text
     };
-    u8 Type;
+    u32 Type;
 };
 
 struct UIState {
@@ -27,3 +27,6 @@ struct UIState {
     u32 UBO;
     u32 Shader;
 };
+
+void BeginUIFrame(Window *Win);
+void EndUIFrame();

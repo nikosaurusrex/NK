@@ -54,6 +54,9 @@ DEFINE_OPENGL_FUNCTION(glGetShaderiv);
 typedef void glGetShaderInfoLogFn(GLuint shader, GLsizei maxLength, GLsizei *length, GLchar *infoLog);
 DEFINE_OPENGL_FUNCTION(glGetShaderInfoLog);
 
+typedef void glUniform2fFn(GLint location, GLfloat v0, GLfloat v1);
+DEFINE_OPENGL_FUNCTION(glUniform2f);
+
 typedef void glDrawArraysInstancedFn(GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
 DEFINE_OPENGL_FUNCTION(glDrawArraysInstanced);
  
@@ -84,6 +87,8 @@ void LoadOpenGL() {
     LOAD_OPENGL_FUNCTION(glCompileShader);
     LOAD_OPENGL_FUNCTION(glGetShaderiv);
     LOAD_OPENGL_FUNCTION(glGetShaderInfoLog);
+
+    LOAD_OPENGL_FUNCTION(glUniform2f);
 
     LOAD_OPENGL_FUNCTION(glDrawArraysInstanced);
 }

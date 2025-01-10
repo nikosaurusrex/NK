@@ -2,6 +2,10 @@ global UIState UI;
 
 #define UI_MAX_RENDER_COMMAND_BUFFER_SIZE KiloBytes(16)
 
+enum {
+    UI_UNIFORM_WINDOW_SIZE = 1
+};
+
 void PrintShaderLog(GLuint Shader) {
     int Length = 0, CharsWritten = 0;
     char *Log;
@@ -57,8 +61,8 @@ GLuint CompileShader(String Source, GLenum Type, const char *StageName) {
 u32 LoadUIShaders() {
     u32 Result;
 
-    String VertSource = ReadFile("");
-    String FragSource = ReadFile("");
+    String VertSource = ReadFile("NK/UI/Vertex.glsl");
+    String FragSource = ReadFile("NK/UI/Fragment.glsl");
 
     if (!VertSource.Pointer) {
         PrintLiteral("UI vertex shader file not found!\n");
@@ -144,8 +148,16 @@ void PushText(String Text, Vec2 Position, u32 Color ) {
     }
 }
 
-void BeginUIFrame() {
+void BeginUIFrame(Window *Win) {
     UI.ResetArena = BeginTempArena(&UI.RenderCommands);
+
+    int Width = Win->Size.X;
+    int Height = Win->Size.Y;
+
+    glUseProgram(UI.Shader);
+    glUniform2f(UI_UNIFORM_WINDOW_SIZE, float(Width), float(Height));
+
+    glViewport(0, 0, Width, Height);
 }
 
 void EndUIFrame() {
