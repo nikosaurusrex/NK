@@ -44,7 +44,6 @@ void UnorderedRemove(Array<T> &A, u64 Index) {
 
 template<typename T>
 void OrderedRemove(Array<T> &A, u64 Index) {
-    T Item = A.Pointer[Index];
     MoveMemory(A.Pointer + Index, A.Pointer + Index + 1, ((A.Length - Index) - 1) * sizeof(T));
 
     A.Length--;

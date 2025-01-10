@@ -10,10 +10,6 @@
 #define STB_SPRINTF_IMPLEMENTATION
 #include "../ThirdParty/stb_sprintf.h"
 
-#pragma comment (lib, "kernel32")
-#pragma comment (lib, "user32")
-#pragma comment (lib, "Advapi32")
-
 struct WindowsState {
     u64 usResolution;
     b8 LargePagesEnabled;

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "math.h"
-
 #if ARCH_X64
 #include <immintrin.h>
 #endif

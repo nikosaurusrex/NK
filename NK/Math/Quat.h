@@ -24,10 +24,10 @@ union Quat {
 
         float Th = Theta / 2.0f;
 
-        W = cosf(Th);
+        W = Cos(Th);
 
-        X = N.X * sinf(Th);
-        Y = N.Y * sinf(Th);
-        Z = N.Z * sinf(Th);
+        X = N.X * Sin(Th);
+        Y = N.Y * Sin(Th);
+        Z = N.Z * Sin(Th);
     }
 };

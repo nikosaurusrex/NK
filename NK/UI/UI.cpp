@@ -1,5 +1,7 @@
 global UIState UI;
 
+#include "../ThirdParty/stb_build.cpp"
+
 #define UI_MAX_RENDER_COMMAND_BUFFER_SIZE KiloBytes(16)
 
 enum {
@@ -93,7 +95,27 @@ u32 LoadUIShaders() {
     glDeleteShader(VertexShader);
     glDeleteShader(FragmentShader);
 
+    HeapFree(VertSource.Pointer);
+    HeapFree(FragSource.Pointer);
+
     return Result;
+}
+
+void LoadFont(const char *FontPath) {
+    String Content = ReadFile(FontPath);
+
+    if (!Content.Pointer) {
+        Print("Font file not found: %s!\n", FontPath);
+        Exit(1);
+    }
+
+    stbtt_fontinfo FontInfo;
+    stbtt_InitFont(&FontInfo, Content.Pointer, 0);
+
+    int Width, Height, XOffset, YOffset;
+    unsigned char *Bitmap = stbtt_GetCodepointBitmap(&FontInfo, 0, stbtt_ScaleForPixelHeight(&FontInfo, 48), 'A', &Width, &Height, &XOffset, &YOffset);
+
+    HeapFree(Content.Pointer);
 }
 
 void InitUI() {
@@ -108,6 +130,7 @@ void InitUI() {
     glBindBufferRange(GL_UNIFORM_BUFFER, 0, UI.UBO, 0, UI_MAX_RENDER_COMMAND_BUFFER_SIZE);
 
     UI.Shader = LoadUIShaders();
+    LoadFont("NK/UI/Roboto.ttf");
 }
 
 void DestroyUI() {

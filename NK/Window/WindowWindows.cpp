@@ -1,7 +1,4 @@
-#pragma comment (lib, "Gdi32")
-
 #ifdef USE_OPENGL
-#pragma comment (lib, "OpenGL32")
 #include "OpenGLWindows.cpp"
 #endif
 
