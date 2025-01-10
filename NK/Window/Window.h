@@ -1,8 +1,11 @@
 #pragma once
 
+#include "Keys.h"
+
 enum {
     WIN_MAX_KEYS = 256,
     WIN_MAX_TEXT = 256,
+    WIN_MAX_BUTTONS = 12,
 };
 
 struct Int2 {
@@ -38,9 +41,8 @@ struct ButtonInput {
 
 struct InputState {
     ButtonInput Keys[WIN_MAX_KEYS];
+    ButtonInput Buttons[WIN_MAX_BUTTONS];
     
-    ButtonInput LeftButton;
-    ButtonInput RightButton;
     int Scroll;
     int DeltaScroll;
     Int2 MousePosition;
@@ -64,9 +66,13 @@ void SetCursorToArrow();
 void SetCursorToPointer();
 
 char *GetTextInput(int *Length);
-b8 IsKeyDown(u32 Key);
-b8 WasKeyPressed(u32 Key);
-b8 WasKeyReleased(u32 Key);
+b8 IsKeyDown(u8 Key);
+b8 WasKeyPressed(u8 Key);
+b8 WasKeyReleased(u8 Key);
+
+b8 IsButtonDown(u8 Button);
+b8 WasButtonPressed(u8 Button);
+b8 WasButtonReleased(u8 Button);
 
 Int2 GetMousePosition();
 Int2 GetMouseDeltaPosition();

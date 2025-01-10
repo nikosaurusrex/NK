@@ -12,8 +12,8 @@ Arena CreateArena(u64 Size) {
     return Result;
 }
 
-void FreeArena(Arena *A, u64 Size) {
-    ReleaseMemory(A->Pointer, Size);
+void FreeArena(Arena *A) {
+    ReleaseMemory(A->Pointer, A->Size);
 }
 
 Arena CreateSubArena(Arena *Parent, u64 Size) {

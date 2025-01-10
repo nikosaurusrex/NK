@@ -1,6 +1,10 @@
 #define NK_IMPLEMENTATION
+#define USE_OPENGL
 #include "NK/PlatformLayer.h"
 #include "NK/WindowLayer.h"
+#include "NK/MathLayer.h"
+#include "NK/DataStructuresLayer.h"
+#include "NK/UILayer.h"
 
 void NKMain() {
     Window MainWindow = {};
@@ -14,7 +18,10 @@ void NKMain() {
         Exit(1);
     }
 
+    InitUI();
+
     while (MainWindow.Running) {
+
         UpdateWindow(&MainWindow);
     }
 

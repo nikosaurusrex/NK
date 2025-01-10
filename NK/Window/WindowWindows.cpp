@@ -1,7 +1,9 @@
 #pragma comment (lib, "Gdi32")
 
-// TODO: somehow not do on Vulkan
+#ifdef USE_OPENGL
 #pragma comment (lib, "OpenGL32")
+#include "OpenGLWindows.cpp"
+#endif
 
 global HCURSOR CursorHandles[2]; // 0 - arrow, 1 - hand
 global InputState Input;
@@ -47,21 +49,21 @@ static LRESULT CALLBACK WindowProc(HWND Handle, UINT uMsg, WPARAM wParam, LPARAM
                     }
 
                     if (Raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) {
-                        Input.LeftButton.Pressed = 1;
-                        Input.LeftButton.Down = 1;
+                        Input.Buttons[MOUSE_BUTTON_LEFT].Pressed = 1;
+                        Input.Buttons[MOUSE_BUTTON_LEFT].Down = 1;
                     }
                     if (Raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP) {
-                        Input.LeftButton.Released = 1;
-                        Input.LeftButton.Down = 0;
+                        Input.Buttons[MOUSE_BUTTON_LEFT].Released = 1;
+                        Input.Buttons[MOUSE_BUTTON_LEFT].Down = 0;
                     }
 
                     if (Raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN) {
-                        Input.RightButton.Pressed = 1;
-                        Input.RightButton.Down = 1;
+                        Input.Buttons[MOUSE_BUTTON_RIGHT].Pressed = 1;
+                        Input.Buttons[MOUSE_BUTTON_RIGHT].Down = 1;
                     }
                     if (Raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP) {
-                        Input.RightButton.Released = 1;
-                        Input.RightButton.Down = 0;
+                        Input.Buttons[MOUSE_BUTTON_RIGHT].Released = 1;
+                        Input.Buttons[MOUSE_BUTTON_RIGHT].Down = 0;
                     }
                 }
             }
@@ -169,6 +171,8 @@ b8 InitWindow(Window *Win) {
     if (Win->OpenGL) {
         Win->WGLContext = wglCreateContext(DeviceContext);
         wglMakeCurrent(DeviceContext, Win->WGLContext);
+
+        LoadOpenGL();
     }
 
     // Setup Raw Mouse Input
@@ -315,16 +319,28 @@ char *GetTextInput(int *Length) {
     return Input.Text;
 }
 
-b8 IsKeyDown(u32 Key) {
+b8 IsKeyDown(u8 Key) {
     return Input.Keys[Key].Down;
 }
 
-b8 WasKeyPressed(u32 Key) {
+b8 WasKeyPressed(u8 Key) {
     return Input.Keys[Key].Pressed;
 }
 
-b8 WasKeyReleased(u32 Key) {
+b8 WasKeyReleased(u8 Key) {
     return Input.Keys[Key].Released;
+}
+
+b8 IsButtonDown(u8 Button) {
+    return Input.Buttons[Button].Down;
+}
+
+b8 WasButtonPressed(u8 Button) {
+    return Input.Buttons[Button].Pressed;
+}
+
+b8 WasButtonReleased(u8 Button) {
+    return Input.Buttons[Button].Released;
 }
 
 Int2 GetMousePosition() {
