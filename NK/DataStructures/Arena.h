@@ -17,6 +17,8 @@ Arena CreateArena(u64 Size);
 void FreeArena(Arena *A);
 Arena CreateSubArena(Arena *Parent, u64 Size);
 
+void ResetArena(Arena *A);
+
 TempArena BeginTempArena(Arena *Owning);
 void EndTempArena(TempArena TA);
 

@@ -1,14 +1,13 @@
 #include "../ThirdParty/stb_build.cpp"
 
-#define UI_MAX_RENDER_COMMAND_BUFFER_SIZE KiloBytes(16)
-
 enum {
     UI_UNIFORM_WINDOW_SIZE = 1,
     UI_UNIFORM_TEXTURE = 2,
 
-
     UI_ATLAS_WIDTH = 512,
     UI_ATLAS_HEIGHT = 512,
+
+    UI_RENDER_BUFFER_SIZE = KiloBytes(16)
 };
 
 enum {
@@ -26,6 +25,13 @@ struct UIRenderCommand {
     Vec2 UVPosition;
     Vec2 UVSize;
 };
+#define UI_RENDER_GROUP_MAX_ELEMENTS (UI_RENDER_BUFFER_SIZE/sizeof(UIRenderCommand))
+
+struct UIRenderGroup {
+    UIRenderCommand *Commands;
+    UIRenderGroup *Next;
+    u32 CommandCount;
+};
 
 struct UIFont {
     u32 Texture;
@@ -37,8 +43,11 @@ struct UIFont {
 };
 
 struct UIState {
-    Arena RenderCommands;
-    TempArena ResetArena;
+    Arena RenderGroupArena;
+
+    UIRenderGroup *FirstRenderGroup;
+    UIRenderGroup *CurrentRenderGroup;
+
     u32 VAO;
     u32 UBO;
     u32 Shader;
@@ -142,21 +151,23 @@ u32 LoadUIShaders() {
 }
 
 void InitUI() {
-    UI.RenderCommands = CreateArena(UI_MAX_RENDER_COMMAND_BUFFER_SIZE);
+    UI.RenderGroupArena = CreateArena(Megabytes(16));
 
     glGenVertexArrays(1, &UI.VAO);
     glBindVertexArray(UI.VAO);
 
     glGenBuffers(1, &UI.UBO);
     glBindBuffer(GL_UNIFORM_BUFFER, UI.UBO);
-    glBufferData(GL_UNIFORM_BUFFER, UI_MAX_RENDER_COMMAND_BUFFER_SIZE, 0, GL_DYNAMIC_DRAW);
-    glBindBufferRange(GL_UNIFORM_BUFFER, 0, UI.UBO, 0, UI_MAX_RENDER_COMMAND_BUFFER_SIZE);
+    glBufferData(GL_UNIFORM_BUFFER, UI_RENDER_BUFFER_SIZE, 0, GL_DYNAMIC_DRAW);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, UI.UBO, 0, UI_RENDER_BUFFER_SIZE);
 
     UI.Shader = LoadUIShaders();
 
     // Load Font
     String FontPath = "NK/UI/Roboto.ttf";
     int FontSize = 20;
+
+    // TODO: free somewhere
     String Content = ReadFile(FontPath);
 
     if (!Content.Pointer) {
@@ -197,19 +208,51 @@ void DestroyUI() {
     glDeleteProgram(UI.Shader);
     glDeleteBuffers(1, &UI.UBO);
     glDeleteVertexArrays(1, &UI.VAO);
-    FreeArena(&UI.RenderCommands);
+    FreeArena(&UI.RenderGroupArena);
+}
+
+UIRenderGroup *PushRenderGroup() {
+    UIRenderGroup *Result = PushStruct(&UI.RenderGroupArena, UIRenderGroup);
+    Result->Commands = PushArray(&UI.RenderGroupArena, UIRenderCommand, UI_RENDER_GROUP_MAX_ELEMENTS); 
+    Result->Next = 0;
+    Result->CommandCount = 0;
+
+    return Result;
+}
+
+void PushRenderCommand(UIRenderCommand Command) {
+    UIRenderGroup *RenderGroup = UI.CurrentRenderGroup;
+
+    if (!RenderGroup) {
+        RenderGroup = PushRenderGroup();
+
+        UI.FirstRenderGroup = RenderGroup;
+        UI.CurrentRenderGroup = RenderGroup;
+    }
+
+    if (RenderGroup->CommandCount >= UI_RENDER_GROUP_MAX_ELEMENTS) {
+        RenderGroup = PushRenderGroup();
+
+        UI.CurrentRenderGroup->Next = RenderGroup;
+        UI.CurrentRenderGroup = RenderGroup;
+    }
+
+    RenderGroup->Commands[RenderGroup->CommandCount] = Command;
+    RenderGroup->CommandCount++;
 }
 
 void PushRectangle(Vec2 Position, Vec2 Size, u32 Color, float Rounding, u32 Border) {
-    UIRenderCommand *Command = PushStruct(&UI.RenderCommands, UIRenderCommand);
-    Command->Position = Position;
-    Command->Size = Size;
-    Command->Color = Color;
-    Command->Rounding = Rounding;
-    Command->Border = Border;
-    Command->Type = UI_RECTANGLE;
-    Command->UVPosition = Vec2();
-    Command->UVSize = Vec2();
+    UIRenderCommand Command = {};
+    Command.Position = Position;
+    Command.Size = Size;
+    Command.Color = Color;
+    Command.Rounding = Rounding;
+    Command.Border = Border;
+    Command.Type = UI_RECTANGLE;
+    Command.UVPosition = Vec2();
+    Command.UVSize = Vec2();
+
+    PushRenderCommand(Command);
 }
 
 void PushText(String Text, Vec2 Position, u32 Color) {
@@ -223,15 +266,17 @@ void PushText(String Text, Vec2 Position, u32 Color) {
         stbtt_aligned_quad Quad;
         stbtt_GetPackedQuad(Font->GlyphData, UI_ATLAS_WIDTH, UI_ATLAS_HEIGHT, Char, &PosX, &PosY, &Quad, 1);
 
-        UIRenderCommand *Command = PushStruct(&UI.RenderCommands, UIRenderCommand);
-        Command->Position = Vec2(Quad.x0, Quad.y0);
-        Command->Size = Vec2(Quad.x1 - Quad.x0, Quad.y1 - Quad.y0);
-        Command->Color = Color;
-        Command->Rounding = 0;
-        Command->Border = 0;
-        Command->Type = UI_TEXT;
-        Command->UVPosition = Vec2(Quad.s0, Quad.t0);
-        Command->UVSize = Vec2(Quad.s1 - Quad.s0, Quad.t1 - Quad.t0);
+        UIRenderCommand Command = {};
+        Command.Position = Vec2(Quad.x0, Quad.y0);
+        Command.Size = Vec2(Quad.x1 - Quad.x0, Quad.y1 - Quad.y0);
+        Command.Color = Color;
+        Command.Rounding = 0;
+        Command.Border = 0;
+        Command.Type = UI_TEXT;
+        Command.UVPosition = Vec2(Quad.s0, Quad.t0);
+        Command.UVSize = Vec2(Quad.s1 - Quad.s0, Quad.t1 - Quad.t0);
+
+        PushRenderCommand(Command);
     }
 }
 
@@ -255,8 +300,6 @@ void PushTextCentered(String Text, Vec2 Position, Vec2 Size, u32 Color) {
 }
 
 void BeginUIFrame(Window *Win) {
-    UI.ResetArena = BeginTempArena(&UI.RenderCommands);
-
     int Width = Win->Size.X;
     int Height = Win->Size.Y;
 
@@ -264,6 +307,10 @@ void BeginUIFrame(Window *Win) {
     glUniform2f(UI_UNIFORM_WINDOW_SIZE, float(Width), float(Height));
 
     glViewport(0, 0, Width, Height);
+
+    ResetArena(&UI.RenderGroupArena);
+    UI.FirstRenderGroup = 0;
+    UI.CurrentRenderGroup = 0;
 }
 
 void EndUIFrame() {
@@ -279,13 +326,15 @@ void EndUIFrame() {
     glBindTexture(GL_TEXTURE_2D, UI.Font.Texture);
     glUniform1i(UI_UNIFORM_TEXTURE, 0);
 
-    u64 Size = UI.RenderCommands.Top;
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, Size, UI.RenderCommands.Pointer);
+    UIRenderGroup *RenderGroup = UI.FirstRenderGroup;
+    while (RenderGroup) {
+        u64 Size = RenderGroup->CommandCount * sizeof(UIRenderCommand);
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, Size, RenderGroup->Commands);
 
-    u32 Elements = u32(Size / sizeof(UIRenderCommand));
-    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, Elements);
+        glDrawArraysInstanced(GL_TRIANGLES, 0, 6, RenderGroup->CommandCount);
 
-    EndTempArena(UI.ResetArena);
+        RenderGroup = RenderGroup->Next;
+    }
 }
 
 b8 UIButton(String Text, Vec2 Position, Vec2 Size) {

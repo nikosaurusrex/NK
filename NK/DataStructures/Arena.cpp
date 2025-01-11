@@ -26,6 +26,10 @@ Arena CreateSubArena(Arena *Parent, u64 Size) {
     return Result;
 }
 
+void ResetArena(Arena *A) {
+    A->Top = 0;
+}
+
 TempArena BeginTempArena(Arena *Owning) {
     TempArena Result = {};
 

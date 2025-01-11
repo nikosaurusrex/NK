@@ -27,7 +27,8 @@ void NKMain() {
 
         BeginUIFrame(&MainWindow);
 
-        if (UIButton("Exit", Vec2(200.f, 200.f), Vec2(100.f, 50.f))) {
+        for (int i = 0; i < 10; ++i) {
+            UIButton("This is not really funny! WTF is going on. HAHAHAHAHHAH", Vec2(200.f, 50.f + i * 60), Vec2(700.f, 50.f));
         }
 
         EndUIFrame();
