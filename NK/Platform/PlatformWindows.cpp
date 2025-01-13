@@ -1,11 +1,7 @@
-#include "Platform.h"
-
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #define _NO_CRT_STDIO_INLINE
 #include <Windows.h>
-
-#include "../General.h"
 
 #define STB_SPRINTF_IMPLEMENTATION
 #include "../ThirdParty/stb_sprintf.h"

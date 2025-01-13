@@ -42,6 +42,35 @@ struct UIFont {
     stbtt_packedchar GlyphData[96];
 };
 
+enum {
+    UI_INTERACTION_TOGGLE = 0,
+    UI_INTERACTION_PRESS = 1
+};
+
+enum {
+    UI_ACTIVE = 0x1,
+    UI_HOVERED = 0x2
+};
+
+enum {
+    UI_DRAW_ACTIVE = 0x1,
+    UI_DRAW_HOVERED = 0x2,
+    UI_DRAW_BORDER = 0x4,
+    UI_DRAW_ROUNDED = 0x8
+};
+
+struct UIBox {
+    Vec2 Position;
+    Vec2 Size;
+};
+
+struct UIInteraction {
+    union {
+        b8 *Bool;
+    };
+    u32 Type;
+};
+
 struct UIState {
     Arena RenderGroupArena;
 
@@ -211,94 +240,6 @@ void DestroyUI() {
     FreeArena(&UI.RenderGroupArena);
 }
 
-UIRenderGroup *PushRenderGroup() {
-    UIRenderGroup *Result = PushStruct(&UI.RenderGroupArena, UIRenderGroup);
-    Result->Commands = PushArray(&UI.RenderGroupArena, UIRenderCommand, UI_RENDER_GROUP_MAX_ELEMENTS); 
-    Result->Next = 0;
-    Result->CommandCount = 0;
-
-    return Result;
-}
-
-void PushRenderCommand(UIRenderCommand Command) {
-    UIRenderGroup *RenderGroup = UI.CurrentRenderGroup;
-
-    if (!RenderGroup) {
-        RenderGroup = PushRenderGroup();
-
-        UI.FirstRenderGroup = RenderGroup;
-        UI.CurrentRenderGroup = RenderGroup;
-    }
-
-    if (RenderGroup->CommandCount >= UI_RENDER_GROUP_MAX_ELEMENTS) {
-        RenderGroup = PushRenderGroup();
-
-        UI.CurrentRenderGroup->Next = RenderGroup;
-        UI.CurrentRenderGroup = RenderGroup;
-    }
-
-    RenderGroup->Commands[RenderGroup->CommandCount] = Command;
-    RenderGroup->CommandCount++;
-}
-
-void PushRectangle(Vec2 Position, Vec2 Size, u32 Color, float Rounding, u32 Border) {
-    UIRenderCommand Command = {};
-    Command.Position = Position;
-    Command.Size = Size;
-    Command.Color = Color;
-    Command.Rounding = Rounding;
-    Command.Border = Border;
-    Command.Type = UI_RECTANGLE;
-    Command.UVPosition = Vec2();
-    Command.UVSize = Vec2();
-
-    PushRenderCommand(Command);
-}
-
-void PushText(String Text, Vec2 Position, u32 Color) {
-    float PosX = Position.X;
-    float PosY = Position.Y;
-
-    for (u32 i = 0; i < u32(Text.Length); ++i) {
-        char Char = Text[i] - 32;
-
-        UIFont *Font = &UI.Font;
-        stbtt_aligned_quad Quad;
-        stbtt_GetPackedQuad(Font->GlyphData, UI_ATLAS_WIDTH, UI_ATLAS_HEIGHT, Char, &PosX, &PosY, &Quad, 1);
-
-        UIRenderCommand Command = {};
-        Command.Position = Vec2(Quad.x0, Quad.y0);
-        Command.Size = Vec2(Quad.x1 - Quad.x0, Quad.y1 - Quad.y0);
-        Command.Color = Color;
-        Command.Rounding = 0;
-        Command.Border = 0;
-        Command.Type = UI_TEXT;
-        Command.UVPosition = Vec2(Quad.s0, Quad.t0);
-        Command.UVSize = Vec2(Quad.s1 - Quad.s0, Quad.t1 - Quad.t0);
-
-        PushRenderCommand(Command);
-    }
-}
-
-void PushTextCentered(String Text, Vec2 Position, Vec2 Size, u32 Color) {
-    float TextWidth = 0;
-    for (u32 i = 0; i < u32(Text.Length); ++i) {
-        char Char = Text[i];
-
-        int AdvanceWidth, LeftSideBearing;
-        stbtt_GetCodepointHMetrics(&UI.Font.Info, Char, &AdvanceWidth, &LeftSideBearing);
-
-        TextWidth += float(AdvanceWidth) * UI.Font.Scale;
-    }
-
-    Vec2 TextPos = Vec2(
-        Position.X + (Size.X - TextWidth) * .5f,
-        Position.Y + (Size.Y - UI.Font.Height) * .5f + UI.Font.Ascent
-    );
-
-    PushText(Text, TextPos, Color);
-}
-
 void BeginUIFrame(Window *Win) {
     int Width = Win->Size.X;
     int Height = Win->Size.Y;
@@ -337,9 +278,196 @@ void EndUIFrame() {
     }
 }
 
-b8 UIButton(String Text, Vec2 Position, Vec2 Size) {
-    PushRectangle(Position, Size, 0x161616, 0, 0x01666666);
-    PushTextCentered(Text, Position, Size, 0xFFFFFF);
+UIRenderGroup *PushRenderGroup() {
+    UIRenderGroup *Result = PushStruct(&UI.RenderGroupArena, UIRenderGroup);
+    Result->Commands = PushArray(&UI.RenderGroupArena, UIRenderCommand, UI_RENDER_GROUP_MAX_ELEMENTS); 
+    Result->Next = 0;
+    Result->CommandCount = 0;
 
-    return 0;
+    return Result;
 }
+
+void PushRenderCommand(UIRenderCommand Command) {
+    UIRenderGroup *RenderGroup = UI.CurrentRenderGroup;
+
+    if (!RenderGroup) {
+        RenderGroup = PushRenderGroup();
+
+        UI.FirstRenderGroup = RenderGroup;
+        UI.CurrentRenderGroup = RenderGroup;
+    }
+
+    if (RenderGroup->CommandCount >= UI_RENDER_GROUP_MAX_ELEMENTS) {
+        RenderGroup = PushRenderGroup();
+
+        UI.CurrentRenderGroup->Next = RenderGroup;
+        UI.CurrentRenderGroup = RenderGroup;
+    }
+
+    RenderGroup->Commands[RenderGroup->CommandCount] = Command;
+    RenderGroup->CommandCount++;
+}
+
+void PushRectangle(UIBox Box, u32 Color, float Rounding, u32 Border) {
+    UIRenderCommand Command = {};
+    Command.Position = Box.Position;
+    Command.Size = Box.Size;
+    Command.Color = Color;
+    Command.Rounding = Rounding;
+    Command.Border = Border;
+    Command.Type = UI_RECTANGLE;
+    Command.UVPosition = Vec2();
+    Command.UVSize = Vec2();
+
+    PushRenderCommand(Command);
+}
+
+void PushText(String Text, Vec2 Position, u32 Color) {
+    float PosX = Position.X;
+    float PosY = Position.Y;
+
+    for (u32 i = 0; i < u32(Text.Length); ++i) {
+        char Char = Text[i] - 32;
+
+        UIFont *Font = &UI.Font;
+        stbtt_aligned_quad Quad;
+        stbtt_GetPackedQuad(Font->GlyphData, UI_ATLAS_WIDTH, UI_ATLAS_HEIGHT, Char, &PosX, &PosY, &Quad, 1);
+
+        UIRenderCommand Command = {};
+        Command.Position = Vec2(Quad.x0, Quad.y0);
+        Command.Size = Vec2(Quad.x1 - Quad.x0, Quad.y1 - Quad.y0);
+        Command.Color = Color;
+        Command.Rounding = 0;
+        Command.Border = 0;
+        Command.Type = UI_TEXT;
+        Command.UVPosition = Vec2(Quad.s0, Quad.t0);
+        Command.UVSize = Vec2(Quad.s1 - Quad.s0, Quad.t1 - Quad.t0);
+
+        PushRenderCommand(Command);
+    }
+}
+
+void PushTextCentered(String Text, UIBox Box, u32 Color) {
+    Vec2 Position = Box.Position;
+    Vec2 Size = Box.Size;
+
+    float TextWidth = 0;
+    for (u32 i = 0; i < u32(Text.Length); ++i) {
+        char Char = Text[i];
+
+        int AdvanceWidth, LeftSideBearing;
+        stbtt_GetCodepointHMetrics(&UI.Font.Info, Char, &AdvanceWidth, &LeftSideBearing);
+
+        TextWidth += float(AdvanceWidth) * UI.Font.Scale;
+    }
+
+    Vec2 TextPos = Vec2(
+        Position.X + (Size.X - TextWidth) * .5f,
+        Position.Y + (Size.Y - UI.Font.Height) * .5f + UI.Font.Ascent
+    );
+
+    PushText(Text, TextPos, Color);
+}
+
+void DrawBox(UIBox Box, u32 InteractionFlags, u32 DrawFlags) {
+    b32 Active = (InteractionFlags & UI_ACTIVE) && (DrawFlags & UI_DRAW_ACTIVE);
+    b32 Hovered = (InteractionFlags & UI_HOVERED) && (DrawFlags & UI_DRAW_HOVERED);
+
+    u32 Border = 0;
+    if (DrawFlags & UI_DRAW_BORDER) {
+        if (Hovered) {
+            Border = 0x02999999;
+        } else {
+            Border = 0x01666666;
+        }
+    }
+
+    u32 Rounding = 0;
+    if (DrawFlags & UI_DRAW_ROUNDED) {
+        Rounding = 10;
+    }
+
+    u32 Color = 0x161616;
+    if (Active) {
+        if (Hovered) {
+            Color = 0x353535; 
+        } else {
+            Color = 0x292929; 
+        }
+    } else if (Hovered) {
+        Color = 0x222222;
+    }
+
+    PushRectangle(Box, Color, Rounding, Border);
+}
+
+b32 IsHovered(UIBox Box) {
+    Int2 MousePos = GetMousePosition();
+    return MousePos.X > Box.Position.X &&
+            MousePos.Y > Box.Position.Y &&
+            MousePos.X < Box.Position.X + Box.Size.X &&
+            MousePos.Y < Box.Position.Y + Box.Size.Y;
+}
+
+u32 HandleUIInteraction(UIBox Box, UIInteraction Interaction) {
+    u32 Result = 0;
+
+    b32 Hovered = IsHovered(Box);
+    b32 Clicked = WasButtonPressed(MOUSE_BUTTON_LEFT);
+
+    if (Hovered) {
+        Result |= UI_HOVERED;
+    }
+
+    switch (Interaction.Type) {
+    case UI_INTERACTION_TOGGLE: {
+        b8 Value = *Interaction.Bool;
+        if (Hovered && Clicked) {
+            *Interaction.Bool = !Value;
+        }
+        if (Value) {
+            Result |= UI_ACTIVE;
+        }
+    } break;
+    case UI_INTERACTION_PRESS: {
+        if (Hovered && Clicked) {
+            *Interaction.Bool = 1;
+            Result |= UI_ACTIVE;
+        }
+    } break;
+    }
+
+    return Result;
+}
+
+b8 UIButton(String Text, Vec2 Position, Vec2 Size) {
+    b8 Result = 0;
+
+    UIBox Box = {Position, Size};
+    UIInteraction Interaction = {&Result, UI_INTERACTION_PRESS}; 
+
+    u32 InteractionFlags = HandleUIInteraction(Box, Interaction);
+    u32 RenderFlags = UI_DRAW_HOVERED | UI_DRAW_ROUNDED;
+
+    DrawBox(Box, InteractionFlags, RenderFlags);
+    PushTextCentered(Text, Box, 0xFFFFFF);
+
+    return Result;
+}
+
+b8 UIToggleButton(b8 *Value, String Text, Vec2 Position, Vec2 Size) {
+    b8 Result = 0;
+
+    UIBox Box = {Position, Size};
+    UIInteraction Interaction = {Value, UI_INTERACTION_TOGGLE}; 
+
+    u32 InteractionFlags = HandleUIInteraction(Box, Interaction);
+    u32 RenderFlags = UI_DRAW_ACTIVE | UI_DRAW_HOVERED | UI_DRAW_BORDER;
+
+    DrawBox(Box, InteractionFlags, RenderFlags);
+    PushTextCentered(Text, Box, 0xFFFFFF);
+
+    Result = *Value;
+    return Result;
+}
+

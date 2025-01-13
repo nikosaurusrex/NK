@@ -213,12 +213,17 @@ void UpdateWindow(Window *Win) {
 
     Win->Resized = 0;
 
+    Input.Text[0] = 0;
+    Input.TextLength = 0;
+
     Input.MouseDeltaPosition.X = 0;
     Input.MouseDeltaPosition.Y = 0;
     Input.DeltaScroll = 0;
 
-    Input.Text[0] = 0;
-    Input.TextLength = 0;
+    for (int i = 0; i < WIN_MAX_BUTTONS; ++i) {
+        Input.Buttons[i].Pressed = 0;
+        Input.Buttons[i].Released = 0;
+    }
 
     MSG Message;
     while (PeekMessage(&Message, 0, 0, 0, PM_REMOVE)) {

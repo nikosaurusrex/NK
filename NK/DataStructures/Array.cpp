@@ -1,7 +1,3 @@
-#include "Array.h"
-
-#include "../PlatformLayer.h"
-
 template<typename T>
 void Reserve(Array<T> &A, u64 Count) {
     if (Count == 0) {

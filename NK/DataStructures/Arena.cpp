@@ -1,9 +1,7 @@
-#include "Arena.h"
-
-#include "../PlatformLayer.h"
-
 Arena CreateArena(u64 Size) {
     Arena Result = {};
+
+    Size = AlignPow2(Size, GetLargePageSize());
 
     Result.Size = Size;
     Result.Top = 0;

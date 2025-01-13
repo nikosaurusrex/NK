@@ -27,8 +27,14 @@ void NKMain() {
 
         BeginUIFrame(&MainWindow);
 
-        for (int i = 0; i < 10; ++i) {
-            UIButton("This is not really funny! WTF is going on. HAHAHAHAHHAH", Vec2(200.f, 50.f + i * 60), Vec2(700.f, 50.f));
+        for (int i = 0; i < 3; ++i) {
+            if (UIButton("Test Button", Vec2(200.f, 50.f + i * 60), Vec2(200.f, 50.f))) {
+                Print("Button %d pressed!\n", i);
+            }
+        }
+
+        static b8 SomeBool = 0;
+        if (UIToggleButton(&SomeBool, "ToggleButton", Vec2(200.f, 500.f), Vec2(200.f, 50.f))) {
         }
 
         EndUIFrame();
