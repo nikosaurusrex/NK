@@ -1,7 +1,3 @@
-#ifdef USE_OPENGL
-#include "OpenGLWindows.cpp"
-#endif
-
 global HCURSOR CursorHandles[2]; // 0 - arrow, 1 - hand
 global InputState Input;
 
@@ -17,6 +13,11 @@ static LRESULT CALLBACK WindowProc(HWND Handle, UINT uMsg, WPARAM wParam, LPARAM
         } break;
         case WM_SIZE: {
             Win->Resized = 1;
+        } break;
+        case WM_PAINT: {
+            PAINTSTRUCT Ps = {};
+            BeginPaint(Handle, &Ps);
+            EndPaint(Handle, &Ps);
         } break;
         case WM_CHAR: {
             WCHAR UTF16Char = (WCHAR)wParam;
@@ -99,12 +100,6 @@ b8 InitWindow(Window *Win) {
     WindowClass.hCursor = CursorHandles[0];
     WindowClass.lpszClassName = "PlatformWindowClass";
 
-    if (Win->OpenGL) {
-        WindowClass.style = CS_HREDRAW | CS_VREDRAW;
-    } else {
-        WindowClass.style = CS_OWNDC;
-    }
-
     if (!RegisterClassExA(&WindowClass)) {
         Print("RegisterClassExA failed.\n");
         return 0;
@@ -138,40 +133,6 @@ b8 InitWindow(Window *Win) {
 
     SetWindowLongPtr(Handle, GWLP_USERDATA, (LONG_PTR) Win);
 
-    // Setup OpenGL/Vulkan support
-    HDC DeviceContext = GetDC(Handle);
-
-    PIXELFORMATDESCRIPTOR PixelFormat = {};
-    PixelFormat.nSize = sizeof(PixelFormat);
-    PixelFormat.nVersion = 1;
-    PixelFormat.iPixelType = PFD_TYPE_RGBA;
-    PixelFormat.cColorBits = 32;
-    PixelFormat.cAlphaBits = 8;
-    PixelFormat.cDepthBits = 24;
-    PixelFormat.cStencilBits = 8;
-    PixelFormat.iLayerType = PFD_MAIN_PLANE;
-
-    if (Win->OpenGL) {
-        PixelFormat.dwFlags = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER;
-    } else {
-        PixelFormat.dwFlags = PFD_DRAW_TO_WINDOW;
-    }
-
-    int Format = ChoosePixelFormat(DeviceContext, &PixelFormat);
-    if (!Format) {
-        Print("ChoosePixelFormat failed.\n");
-        return 0;
-    }
-
-    SetPixelFormat(DeviceContext, Format, &PixelFormat);
-
-    if (Win->OpenGL) {
-        Win->WGLContext = wglCreateContext(DeviceContext);
-        wglMakeCurrent(DeviceContext, Win->WGLContext);
-
-        LoadOpenGL();
-    }
-
     // Setup Raw Mouse Input
     RAWINPUTDEVICE RawInputDevice = {};
     RawInputDevice.usUsagePage = 0x01;
@@ -185,10 +146,9 @@ b8 InitWindow(Window *Win) {
 
     // Show Window
     ShowWindow(Handle, SW_SHOW);
-    UpdateWindow(Handle);
+    // UpdateWindow(Handle);
 
     Win->Handle = Handle;
-    Win->DeviceContext = DeviceContext;
     Win->Running = 1;
     Win->Style = WS_OVERLAPPEDWINDOW;
 
@@ -196,21 +156,11 @@ b8 InitWindow(Window *Win) {
 }
 
 void DestroyWindow(Window *Win) {
-    if (Win->OpenGL) {
-        wglMakeCurrent(0, 0);
-        wglDeleteContext(Win->WGLContext);
-    }
     ReleaseDC(Win->Handle, Win->DeviceContext);
     DestroyWindow(Win->Handle);
 }
 
 void UpdateWindow(Window *Win) {
-    if (Win->OpenGL) {
-        SwapBuffers(Win->DeviceContext);
-
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    }
-
     Win->Resized = 0;
 
     Input.Text[0] = 0;

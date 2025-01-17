@@ -1,13 +1,24 @@
-#include "../ThirdParty/stb_build.cpp"
+IGNORE_WARNINGS_BEGIN
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+// #include "../ThirdParty/stb_image_write.h"
+IGNORE_WARNINGS_END
+
+#include <dwrite.h>
+#include <dxgi.h>
+#include <d3d11.h>
+#include <d3dcompiler.h>
 
 enum {
-    UI_UNIFORM_WINDOW_SIZE = 1,
-    UI_UNIFORM_TEXTURE = 2,
+    FONT_ATLAS_WIDTH = 512,
+    FONT_ATLAS_HEIGHT = 512,
 
-    UI_ATLAS_WIDTH = 512,
-    UI_ATLAS_HEIGHT = 512,
+    UI_RENDER_BUFFER_SIZE = 16368 // multiple of UIRenderCommand
+};
 
-    UI_RENDER_BUFFER_SIZE = KiloBytes(16)
+enum {
+    FONT_FIRST_CHAR = 32,
+    FONT_LAST_CHAR = 126,
+    FONT_NUM_CHARS = (FONT_LAST_CHAR - FONT_FIRST_CHAR) + 1
 };
 
 enum {
@@ -33,15 +44,6 @@ struct UIRenderGroup {
     u32 CommandCount;
 };
 
-struct UIFont {
-    u32 Texture;
-    stbtt_fontinfo Info;
-    float Height;
-    float Scale;
-    float Ascent;
-    stbtt_packedchar GlyphData[96];
-};
-
 enum {
     UI_INTERACTION_TOGGLE = 0,
     UI_INTERACTION_PRESS = 1
@@ -64,6 +66,11 @@ struct UIBox {
     Vec2 Size;
 };
 
+struct UIWindowConstants {
+    Vec2 Size;
+    Vec2 Placeholder;
+};
+
 struct UIInteraction {
     union {
         b8 *Bool;
@@ -77,166 +84,251 @@ struct UIState {
     UIRenderGroup *FirstRenderGroup;
     UIRenderGroup *CurrentRenderGroup;
 
-    u32 VAO;
-    u32 UBO;
-    u32 Shader;
+    ID3D11Buffer *WindowConstantsBuffer;
+    ID3D11Buffer *RCmdBuffer;
+    ID3D11ShaderResourceView *RCmdBufferView;
+    ID3D11VertexShader *VertexShader;
+    ID3D11PixelShader *PixelShader;
 
-    UIFont Font;
+    u16 GlyphIndices[FONT_NUM_CHARS];
+    float GlyphAdvances[FONT_NUM_CHARS];
+    DWRITE_GLYPH_METRICS GlyphMetrics[FONT_NUM_CHARS];
 };
 
 global UIState UI;
+global ID3D11Device *Device;
+global ID3D11DeviceContext *DeviceContext;
+global IDXGISwapChain *SwapChain;
+global ID3D11RenderTargetView *RenderTargetView;
 
-void PrintShaderLog(GLuint Shader) {
-    int Length = 0, CharsWritten = 0;
-    char *Log;
-    glGetShaderiv(Shader, GL_INFO_LOG_LENGTH, &Length);
+#define DWriteCall(Call) do {         \
+    HRESULT HResult = Call;           \
+    if (FAILED(HResult)) {            \
+         Print("DWrite Call Failed: 0x%x\n", HResult); NK_TRAP(); Exit(1); \
+    }                                 \
+} while (0);
 
-    if (Length <= 0) {
-        return;
-    }
+void InitD3D11(Window *Win) {
+    DXGI_SWAP_CHAIN_DESC SwapChainDesc = {};
+    SwapChainDesc.BufferCount = 2;
+    SwapChainDesc.BufferDesc.Width = Win->Size.X;
+    SwapChainDesc.BufferDesc.Height = Win->Size.Y;
+    SwapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    SwapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    SwapChainDesc.OutputWindow = Win->Handle;
+    SwapChainDesc.SampleDesc.Count = 1;
+    SwapChainDesc.Windowed = TRUE;
+    SwapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
 
-    Log = (char *) HeapAlloc(Length);
-    glGetShaderInfoLog(Shader, Length, &CharsWritten, Log);
-    Print("Shader Info Log: %s\n", Log);
-    Exit(1);
+    // TODO: change flags based on build
+    u32 Flags = D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_DEBUG;
+    D3D_FEATURE_LEVEL Features[] = {
+        D3D_FEATURE_LEVEL_11_1,
+    };
 
-    HeapFree(Log);
+    DWriteCall(D3D11CreateDeviceAndSwapChain(
+        0,
+        D3D_DRIVER_TYPE_HARDWARE,
+        0, Flags, Features, ArrayCount(Features),
+        D3D11_SDK_VERSION,
+        &SwapChainDesc,
+        &SwapChain,
+        &Device,
+        0,
+        &DeviceContext
+    ));
+
+    ID3D11Texture2D* BackBuffer = 0;
+    DWriteCall(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer));
+
+    Device->CreateRenderTargetView(BackBuffer, 0, &RenderTargetView);
+    BackBuffer->Release();
+
+    DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
+
+    D3D11_VIEWPORT Viewport = {};
+    Viewport.Width = float(Win->Size.X);
+    Viewport.Height = float(Win->Size.Y);
+    Viewport.MinDepth = 0.0f;
+    Viewport.MaxDepth = 1.0f;
+    DeviceContext->RSSetViewports(1, &Viewport);
+    
+    DeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 }
 
-void PrintProgramLog(GLuint Program) {
-    int Length = 0, CharsWritten = 0;
-    char *Log;
-    glGetProgramiv(Program, GL_INFO_LOG_LENGTH, &Length);
+void CompileShader(LPCWSTR FilePath, LPCSTR EntryPoint, LPCSTR Target, ID3DBlob **Blob) {
+    ID3DBlob *Error = 0;
+    HRESULT HResult = D3DCompileFromFile(FilePath, 0, 0, EntryPoint, Target, 0, 0, Blob, &Error);
 
-    if (Length <= 0) {
-        return;
+    if (FAILED(HResult)) {
+        if (Error) {
+            PrintLiteral((char *) Error->GetBufferPointer());
+            Error->Release();
+        }
     }
-
-    Log = (char *) HeapAlloc(Length);
-    glGetProgramInfoLog(Program, Length, &CharsWritten, Log);
-    Print("Program Info Log: %s\n", Log);
-    Exit(1);
-
-    HeapFree(Log);
+    if (Error) {
+        Error->Release();
+    }
 }
 
-GLuint CompileShader(String Source, GLenum Type, const char *StageName) {
-    GLuint Result = 0;
+void LoadShaders() {
+    ID3DBlob *VertexBlob = 0;
+    ID3DBlob *PixelBlob = 0;
 
-    Result = glCreateShader(Type);
-    char *Pointer = (char *) Source.Pointer;
-    glShaderSource(Result, 1, &Pointer, 0);
+    CompileShader(L"NK/UI/Shader.hlsl", "VSMain", "vs_5_0", &VertexBlob);
+    CompileShader(L"NK/UI/Shader.hlsl", "PSMain", "ps_5_0", &PixelBlob);
 
-    GLint Success = 0;
+    Device->CreateVertexShader(VertexBlob->GetBufferPointer(), VertexBlob->GetBufferSize(), 0, &UI.VertexShader);
+    Device->CreatePixelShader(PixelBlob->GetBufferPointer(), PixelBlob->GetBufferSize(), 0, &UI.PixelShader);
 
-    glCompileShader(Result);
-    glGetShaderiv(Result, GL_COMPILE_STATUS, &Success);
-    if (Success != 1) {
-        PrintShaderLog(Result);
-    }
+    D3D11_BUFFER_DESC RCmdBufferDesc = {};
+    RCmdBufferDesc.ByteWidth = UI_RENDER_BUFFER_SIZE;
+    RCmdBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+    RCmdBufferDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    RCmdBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    RCmdBufferDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+    RCmdBufferDesc.StructureByteStride = sizeof(UIRenderCommand);
 
-    return Result;
+    DWriteCall(Device->CreateBuffer(&RCmdBufferDesc, 0, &UI.RCmdBuffer));
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC RCmdBufferViewDesc = {};
+    RCmdBufferViewDesc.Format = DXGI_FORMAT_UNKNOWN;
+    RCmdBufferViewDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    RCmdBufferViewDesc.Buffer.FirstElement = 0;
+    RCmdBufferViewDesc.Buffer.NumElements = UI_RENDER_GROUP_MAX_ELEMENTS;
+
+    DWriteCall(Device->CreateShaderResourceView(UI.RCmdBuffer, &RCmdBufferViewDesc, &UI.RCmdBufferView));
+
+    D3D11_BUFFER_DESC WindowConstantsBufferDesc = {};
+    WindowConstantsBufferDesc.ByteWidth = sizeof(UIWindowConstants);
+    WindowConstantsBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+    WindowConstantsBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    WindowConstantsBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+    DWriteCall(Device->CreateBuffer(&WindowConstantsBufferDesc, 0, &UI.WindowConstantsBuffer));
+
+    VertexBlob->Release();
+    PixelBlob->Release();
 }
 
-u32 LoadUIShaders() {
-    u32 Result = 0;
+void InitDirectWrite() {
+	IDWriteFactory *DWriteFactory = 0;
+    DWriteCall(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown **) &DWriteFactory));
 
-    String VertSource = ReadFile("NK/UI/Vertex.glsl");
-    String FragSource = ReadFile("NK/UI/Fragment.glsl");
+    IDWriteFontCollection *FontCollection = 0;
+    DWriteCall(DWriteFactory->GetSystemFontCollection(&FontCollection));
 
-    if (!VertSource.Pointer) {
-        PrintLiteral("UI vertex shader file not found!\n");
+    UINT32 FontIndex;
+    BOOL Exists;
+    DWriteCall(FontCollection->FindFamilyName(L"Roboto", &FontIndex, &Exists));
+    if (!Exists) {
+        Print("Font not found.\n");
         Exit(1);
     }
 
-    if (!FragSource.Pointer) {
-        PrintLiteral("UI fragment shader file not found!\n");
-        Exit(1);
+    IDWriteFontFamily *FontFamily = 0;
+    DWriteCall(FontCollection->GetFontFamily(FontIndex, &FontFamily));
+
+    IDWriteFont *Font = 0;
+    DWriteCall(FontFamily->GetFont(0, &Font));
+
+    IDWriteFontFace *FontFace = 0;
+    DWriteCall(Font->CreateFontFace(&FontFace));
+
+    for (u32 Char = FONT_FIRST_CHAR; Char <= FONT_LAST_CHAR; ++Char) {
+        u16 GlyphIndex = 0;
+        DWriteCall(FontFace->GetGlyphIndices(&Char, 1, &GlyphIndex));
+        UI.GlyphIndices[Char - FONT_FIRST_CHAR] = GlyphIndex;
+    }
+    
+    DWriteCall(FontFace->GetDesignGlyphMetrics(
+        UI.GlyphIndices,
+        FONT_NUM_CHARS,
+        UI.GlyphMetrics
+    ));
+
+    u8 *AtlasData = (u8 *) HeapAlloc(FONT_ATLAS_WIDTH * 3 * FONT_ATLAS_HEIGHT);
+
+    int PenX = 0;
+    int PenY = 0;
+    int RowHeight = 0;
+    for (int i = 0; i < FONT_NUM_CHARS; ++i) {
+        DWRITE_GLYPH_RUN GlyphRun = {};
+        GlyphRun.fontFace = FontFace;
+        GlyphRun.fontEmSize = 32.0f;
+        GlyphRun.glyphCount = 1;
+        GlyphRun.glyphIndices = &UI.GlyphIndices[i];
+        GlyphRun.glyphAdvances = &UI.GlyphAdvances[i];
+
+        IDWriteGlyphRunAnalysis *GlyphRunAnalysis = 0;
+        DWriteCall(DWriteFactory->CreateGlyphRunAnalysis(
+            &GlyphRun, 1.0f, 0,
+            DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL,
+            DWRITE_MEASURING_MODE_NATURAL,
+            0.0f, 0.0f, &GlyphRunAnalysis
+        ));
+
+        RECT TextureBounds;
+        DWriteCall(GlyphRunAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &TextureBounds));
+
+        int TextureWidth = (TextureBounds.right - TextureBounds.left) * 3;
+        int TextureHeight = TextureBounds.bottom - TextureBounds.top;
+
+        u8 *TextureData = (u8 *) HeapAlloc(TextureWidth * TextureHeight);
+
+        GlyphRunAnalysis->CreateAlphaTexture(
+            DWRITE_TEXTURE_CLEARTYPE_3x1,
+            &TextureBounds,
+            TextureData,
+            TextureWidth * TextureHeight
+        );
+
+        if (PenX + TextureWidth > FONT_ATLAS_WIDTH * 3) {
+            PenX = 0;
+            PenY += RowHeight;
+            RowHeight = 0;
+        }
+
+        if (TextureHeight > RowHeight) {
+            RowHeight = TextureHeight;
+        }
+
+        for (int Row = 0; Row < TextureHeight; ++Row) {
+            for (int Column = 0; Column < TextureWidth; ++Column) {
+                int Index = (PenY + Row) * (FONT_ATLAS_WIDTH * 3) + (PenX + Column);
+                u8 D = TextureData[Row * TextureWidth + Column];
+                AtlasData[Index] = D;
+            }
+        }
+
+        PenX += TextureWidth;
+        HeapFree(TextureData);
     }
 
-    GLuint VertexShader = CompileShader(VertSource, GL_VERTEX_SHADER, "vertex");
-    GLuint FragmentShader = CompileShader(FragSource, GL_FRAGMENT_SHADER, "fragment");
-
-    Result = glCreateProgram();
-
-    glAttachShader(Result, VertexShader);
-    glAttachShader(Result, FragmentShader);
-
-    glLinkProgram(Result);
-
-    GLint Success = 0;
-    glGetProgramiv(Result, GL_LINK_STATUS, &Success);
-    if (Success != 1) {
-        PrintProgramLog(Result);
-    }
-
-    glDeleteShader(VertexShader);
-    glDeleteShader(FragmentShader);
-
-    HeapFree(VertSource.Pointer);
-    HeapFree(FragSource.Pointer);
-
-    return Result;
+    HeapFree(AtlasData);
 }
 
-void InitUI() {
+void InitUI(Window *Win) {
     UI.RenderGroupArena = CreateArena(Megabytes(16));
 
-    glGenVertexArrays(1, &UI.VAO);
-    glBindVertexArray(UI.VAO);
-
-    glGenBuffers(1, &UI.UBO);
-    glBindBuffer(GL_UNIFORM_BUFFER, UI.UBO);
-    glBufferData(GL_UNIFORM_BUFFER, UI_RENDER_BUFFER_SIZE, 0, GL_DYNAMIC_DRAW);
-    glBindBufferRange(GL_UNIFORM_BUFFER, 0, UI.UBO, 0, UI_RENDER_BUFFER_SIZE);
-
-    UI.Shader = LoadUIShaders();
-
-    // Load Font
-    String FontPath = "NK/UI/Roboto.ttf";
-    int FontSize = 20;
-
-    // TODO: free somewhere
-    String Content = ReadFile(FontPath);
-
-    if (!Content.Pointer) {
-        Print("Font file not found: %s!\n", FontPath);
-        Exit(1);
-    }
-
-    u8 *Atlas = (u8 *) HeapAlloc(UI_ATLAS_WIDTH * UI_ATLAS_HEIGHT);
-
-    UIFont *Font = &UI.Font;
-    stbtt_pack_context PackContext;
-    stbtt_PackBegin(&PackContext, Atlas, UI_ATLAS_WIDTH, UI_ATLAS_HEIGHT, 0, 1, 0);
-    stbtt_PackSetOversampling(&PackContext, 2, 2);
-    stbtt_PackFontRange(&PackContext, Content.Pointer, 0, FontSize, 32, 96, Font->GlyphData);
-    stbtt_PackEnd(&PackContext);
-
-    glGenTextures(1, &Font->Texture);
-    glBindTexture(GL_TEXTURE_2D, Font->Texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, UI_ATLAS_WIDTH, UI_ATLAS_HEIGHT, 0, GL_RED, GL_UNSIGNED_BYTE, Atlas);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    stbtt_InitFont(&Font->Info, Content.Pointer, 0);
-    int Ascent, Descent, LineGap;
-    stbtt_GetFontVMetrics(&Font->Info, &Ascent, &Descent, &LineGap); 
-
-    float PixelScale = stbtt_ScaleForPixelHeight(&Font->Info, FontSize);
-    Font->Height = float(Ascent - Descent) * PixelScale;
-    Font->Scale = PixelScale;
-    Font->Ascent = float(Ascent) * Font->Scale;
-
-    HeapFree(Atlas);
+    InitD3D11(Win);
+    LoadShaders();
+    InitDirectWrite();
 }
 
 void DestroyUI() {
-    glDeleteTextures(1, &UI.Font.Texture);
-    glDeleteProgram(UI.Shader);
-    glDeleteBuffers(1, &UI.UBO);
-    glDeleteVertexArrays(1, &UI.VAO);
+    if (RenderTargetView) {
+        RenderTargetView->Release();
+    }
+    if (SwapChain) {
+        SwapChain->Release();
+    }
+    if (DeviceContext) {
+        DeviceContext->Release();
+    }
+    if (Device) {
+        Device->Release();
+    }
     FreeArena(&UI.RenderGroupArena);
 }
 
@@ -244,10 +336,44 @@ void BeginUIFrame(Window *Win) {
     int Width = Win->Size.X;
     int Height = Win->Size.Y;
 
-    glUseProgram(UI.Shader);
-    glUniform2f(UI_UNIFORM_WINDOW_SIZE, float(Width), float(Height));
+    if (Win->Resized) {
+        if (!DeviceContext || !SwapChain) return;
 
-    glViewport(0, 0, Width, Height);
+        if (RenderTargetView) {
+            RenderTargetView->Release();
+            RenderTargetView = 0;
+        }
+
+        DWriteCall(SwapChain->ResizeBuffers(2, Width, Height, DXGI_FORMAT_UNKNOWN, 0));
+
+        ID3D11Texture2D* BackBuffer = 0;
+        DWriteCall(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer));
+
+        DWriteCall(Device->CreateRenderTargetView(BackBuffer, 0, &RenderTargetView));
+        BackBuffer->Release();
+
+        DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
+
+        D3D11_VIEWPORT Viewport = {};
+        Viewport.Width = float(Width);
+        Viewport.Height = float(Height);
+        Viewport.MinDepth = 0.0f;
+        Viewport.MaxDepth = 1.0f;
+
+        DeviceContext->RSSetViewports(1, &Viewport);
+    }
+
+    float ClearColor[4] = { 0.0f, 0.2f, 0.4f, 1.0f };
+    DeviceContext->ClearRenderTargetView(RenderTargetView, ClearColor);
+
+    UIWindowConstants WindowConstants = {};
+    WindowConstants.Size.X = Win->Size.X;
+    WindowConstants.Size.Y = Win->Size.Y;
+
+    D3D11_MAPPED_SUBRESOURCE Mapped;
+    DeviceContext->Map(UI.WindowConstantsBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &Mapped);
+    CopyMemory(Mapped.pData, &WindowConstants, sizeof(UIWindowConstants));
+    DeviceContext->Unmap(UI.WindowConstantsBuffer, 0);
 
     ResetArena(&UI.RenderGroupArena);
     UI.FirstRenderGroup = 0;
@@ -255,27 +381,29 @@ void BeginUIFrame(Window *Win) {
 }
 
 void EndUIFrame() {
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
 
-    glUseProgram(UI.Shader);
-    glBindVertexArray(UI.VAO);
+    DeviceContext->VSSetShaderResources(0, 1, &UI.RCmdBufferView);
+    DeviceContext->VSSetConstantBuffers(0, 1, &UI.WindowConstantsBuffer);
 
-    glBindBuffer(GL_UNIFORM_BUFFER, UI.UBO);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, UI.Font.Texture);
-    glUniform1i(UI_UNIFORM_TEXTURE, 0);
+    DeviceContext->VSSetShader(UI.VertexShader, 0, 0);
+    DeviceContext->PSSetShader(UI.PixelShader, 0, 0);
 
     UIRenderGroup *RenderGroup = UI.FirstRenderGroup;
     while (RenderGroup) {
         u64 Size = RenderGroup->CommandCount * sizeof(UIRenderCommand);
-        glBufferSubData(GL_UNIFORM_BUFFER, 0, Size, RenderGroup->Commands);
 
-        glDrawArraysInstanced(GL_TRIANGLES, 0, 6, RenderGroup->CommandCount);
+        D3D11_MAPPED_SUBRESOURCE Mapped;
+        DeviceContext->Map(UI.RCmdBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &Mapped);
+        CopyMemory(Mapped.pData, RenderGroup->Commands, Size);
+        DeviceContext->Unmap(UI.RCmdBuffer, 0);
+
+        DeviceContext->DrawInstanced(6, RenderGroup->CommandCount, 0, 0);
 
         RenderGroup = RenderGroup->Next;
     }
+
+    SwapChain->Present(1, 0);
 }
 
 UIRenderGroup *PushRenderGroup() {
@@ -326,45 +454,13 @@ void PushText(String Text, Vec2 Position, u32 Color) {
     float PosX = Position.X;
     float PosY = Position.Y;
 
-    for (u32 i = 0; i < u32(Text.Length); ++i) {
-        char Char = Text[i] - 32;
-
-        UIFont *Font = &UI.Font;
-        stbtt_aligned_quad Quad;
-        stbtt_GetPackedQuad(Font->GlyphData, UI_ATLAS_WIDTH, UI_ATLAS_HEIGHT, Char, &PosX, &PosY, &Quad, 1);
-
-        UIRenderCommand Command = {};
-        Command.Position = Vec2(Quad.x0, Quad.y0);
-        Command.Size = Vec2(Quad.x1 - Quad.x0, Quad.y1 - Quad.y0);
-        Command.Color = Color;
-        Command.Rounding = 0;
-        Command.Border = 0;
-        Command.Type = UI_TEXT;
-        Command.UVPosition = Vec2(Quad.s0, Quad.t0);
-        Command.UVSize = Vec2(Quad.s1 - Quad.s0, Quad.t1 - Quad.t0);
-
-        PushRenderCommand(Command);
-    }
 }
 
 void PushTextCentered(String Text, UIBox Box, u32 Color) {
     Vec2 Position = Box.Position;
     Vec2 Size = Box.Size;
 
-    float TextWidth = 0;
-    for (u32 i = 0; i < u32(Text.Length); ++i) {
-        char Char = Text[i];
-
-        int AdvanceWidth, LeftSideBearing;
-        stbtt_GetCodepointHMetrics(&UI.Font.Info, Char, &AdvanceWidth, &LeftSideBearing);
-
-        TextWidth += float(AdvanceWidth) * UI.Font.Scale;
-    }
-
-    Vec2 TextPos = Vec2(
-        Position.X + (Size.X - TextWidth) * .5f,
-        Position.Y + (Size.Y - UI.Font.Height) * .5f + UI.Font.Ascent
-    );
+    Vec2 TextPos = Vec2();
 
     PushText(Text, TextPos, Color);
 }
@@ -382,7 +478,7 @@ void DrawBox(UIBox Box, u32 InteractionFlags, u32 DrawFlags) {
         }
     }
 
-    u32 Rounding = 0;
+    float Rounding = 0;
     if (DrawFlags & UI_DRAW_ROUNDED) {
         Rounding = 10;
     }
@@ -447,7 +543,7 @@ b8 UIButton(String Text, Vec2 Position, Vec2 Size) {
     UIInteraction Interaction = {&Result, UI_INTERACTION_PRESS}; 
 
     u32 InteractionFlags = HandleUIInteraction(Box, Interaction);
-    u32 RenderFlags = UI_DRAW_HOVERED | UI_DRAW_ROUNDED;
+    u32 RenderFlags = UI_DRAW_HOVERED | UI_DRAW_BORDER;
 
     DrawBox(Box, InteractionFlags, RenderFlags);
     PushTextCentered(Text, Box, 0xFFFFFF);

@@ -21,15 +21,12 @@ struct Window {
 
     b8 Running;
     b8 Fullscreen;
-    b8 OpenGL;
 
 #if OS_WINDOWS
     HWND Handle;
     HDC DeviceContext;
     RECT Rect;
     DWORD Style;
-
-    HGLRC WGLContext;
 #endif
 };
 

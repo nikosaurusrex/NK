@@ -1,8 +1,7 @@
 #include "Platform.h"
 
-#if ARCH_X64
+#if ARCH_X64 && COMPILER_CLANG
 
-#pragma function(memcpy)
 void *memcpy(void *Dest, void const *Source, size_t Size) {
     __asm__ volatile (
         "rep movsb"
@@ -13,7 +12,6 @@ void *memcpy(void *Dest, void const *Source, size_t Size) {
     return Dest;
 }
 
-#pragma function(memset)
 void *memset(void *Pointer, int Byte, size_t Size) {
     __asm__ volatile (
         "rep stosb"
@@ -24,7 +22,6 @@ void *memset(void *Pointer, int Byte, size_t Size) {
     return Pointer;
 }
 
-#pragma function(memmove)
 void *memmove(void *_Dest, const void *_Source, size_t Size) {
     u8 *Dest = (u8 *)_Dest;
     u8 *Source = (u8 *)_Source;
@@ -74,24 +71,26 @@ int _CompareMemory(u8 *A, u8 *B, u64 Size) {
 
 #else
 
-#pragma function(memcpy)
-void *memcpy(void *Dest, void const *Source, size_t Size) {
+void *memcpy(void *_Dest, void const *_Source, size_t Size) {
+    u8 *Dest = (u8 *)_Dest;
+    u8 *Source = (u8 *)_Source;
     for (u64 i = 0; i < Size; i++) {
         Dest[i] = Source[i];
     }
     return Dest;
 }
 
-#pragma function(memset)
-void *memset(void *Pointer, int Byte, size_t Size) {
+void *memset(void *_Pointer, int Byte, size_t Size) {
+    u8 *Pointer = (u8 *)_Pointer;
     for (u64 i = 0; i < Size; i++) {
         Pointer[i] = Byte;
     }
     return Pointer;
 }
 
-#pragma function(memmove)
-void *memmove(void *Dest, const void *Source, size_t Size) {
+void *memmove(void *_Dest, const void *_Source, size_t Size) {
+    u8 *Dest = (u8 *)_Dest;
+    u8 *Source = (u8 *)_Source;
     if (Dest < Source) {
         for (u64 i = 0; i < Size; i++) {
             Dest[i] = Source[i];
@@ -136,7 +135,7 @@ String ReadFile(String Path) {
     OS_Handle Handle = OpenFile(Path, OS_READ | OS_SHARED);
 
     if (!IsValidFile(Handle)) {
-        return (String){0, 0};
+        return String();
     }
 
     OS_FileInfo FileInfo = GetFileInfo(Handle);

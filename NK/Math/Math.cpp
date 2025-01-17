@@ -1,9 +1,9 @@
+#if ARCH_X64
+#include <intrin.h>
+
 IGNORE_WARNINGS_BEGIN
 #include "ThirdParty/sse_mathfun.h"
 IGNORE_WARNINGS_END
-
-#if ARCH_X64
-#include <smmintrin.h>
 
 float Sin(float Radians) {
     return _mm_cvtss_f32(sin_ps(_mm_set_ss(Radians)));
@@ -83,34 +83,33 @@ float Power(float Base, float Exponent) {
 float ACos(float X) {
     float negate = float(X < 0);
     X = AbsoluteValue(X);
-    float ret = -0.0187293;
+    float ret = -0.0187293f;
     ret = ret * X;
-    ret = ret + 0.0742610;
+    ret = ret + 0.0742610f;
     ret = ret * X;
-    ret = ret - 0.2121144;
+    ret = ret - 0.2121144f;
     ret = ret * X;
-    ret = ret + 1.5707288;
-    ret = ret * SquareRoot(1.0-X);
+    ret = ret + 1.5707288f;
+    ret = ret * SquareRoot(1.0f-X);
     ret = ret - 2 * negate * ret;
-    return negate * 3.14159265358979 + ret;
+    return negate * 3.14159265358979f + ret;
 }
 
-#pragma function(sinf)
+#include <math.h>
+
 float sinf(float arg) {
     return Sin(arg);
 }
 
-#pragma function(cosf)
 float cosf(float arg) {
     return Cos(arg);
 }
 
-#pragma function(tanf)
 float tanf(float arg) {
     return Tan(arg);
 }
 
-#pragma function(sqrt)
 float sqrtf(float arg) {
     return SquareRoot(arg);
 }
+

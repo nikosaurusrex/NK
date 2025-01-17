@@ -1,5 +1,4 @@
 #define NK_IMPLEMENTATION
-#define USE_OPENGL
 #include "NK/PlatformLayer.h"
 #include "NK/WindowLayer.h"
 #include "NK/MathLayer.h"
@@ -11,16 +10,13 @@ void NKMain() {
     MainWindow.Title = "Example Window";
     MainWindow.Size.X = 1280;
     MainWindow.Size.Y = 720;
-    MainWindow.OpenGL = 1;
 
     if (!InitWindow(&MainWindow)) {
         Print("Failed to initialize window!\n");
         Exit(1);
     }
 
-    InitUI();
-
-    glClearColor(0.2, 0.3, 0.1, 1.0);
+    InitUI(&MainWindow);
 
     while (MainWindow.Running) {
         UpdateWindow(&MainWindow);

@@ -3,6 +3,7 @@
 #include "Platform/PlatformContext.h"
 
 #include <stdint.h>
+#include <float.h>
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -145,5 +146,5 @@ readonly global s32 MinS32 = (s32) 0xffffffff;
 readonly global s16 MinS16 = (s16) 0xffff;
 readonly global s8 MinS8 = (s8) 0xff;
 
-readonly global float FloatMax = 3.4028235e+38f;
-readonly global float FloatMin = -3.4028235e+38f;
+readonly global float FloatMax = FLT_MAX;
+readonly global float FloatMin = FLT_MIN;
