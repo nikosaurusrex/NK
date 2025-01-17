@@ -4,4 +4,4 @@ set CompilerFlags=-I./ -nologo -arch:AVX2 -fp:fast -fp:except- -GR- -EHa- -Zo -W
 set LinkerFlags=-incremental:no -opt:ref user32.lib kernel32.lib Advapi32.lib
 
 clang-cl %CompilerFlags% NKTests/Tests.cpp /link -OUT:Tests.exe /NODEFAULTLIB /SUBSYSTEM:console %LinkerFlags%
-clang-cl %CompilerFlags% NKTests/WindowTest.cpp /link -OUT:WindowTest.exe /NODEFAULTLIB /SUBSYSTEM:console %LinkerFlags% Gdi32.lib d3d11.lib dwrite.lib D3DCompiler.lib dxguid.lib
+clang-cl %CompilerFlags% NKTests/WindowTest.cpp /link -OUT:WindowTest.exe /NODEFAULTLIB /SUBSYSTEM:console %LinkerFlags% Gdi32.lib d3d11.lib dwrite.lib D3DCompiler.lib dxguid.lib d2d1.lib

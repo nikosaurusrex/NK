@@ -146,7 +146,7 @@ String ReadFile(String Path) {
     return contents;
 }
 
-internal void RunTaskQueue(void *Args) {
+internal u32 RunTaskQueue(void *Args) {
     TaskQueue *Queue = (TaskQueue *) Args;
 
     while (!Queue->Canceled) {
@@ -163,6 +163,8 @@ internal void RunTaskQueue(void *Args) {
             TakeSemaphore(Queue->Semaphore);
         }
     }
+
+    return 0;
 }
 
 void CreateTaskQueue(TaskQueue *Queue, u32 ThreadCount) {

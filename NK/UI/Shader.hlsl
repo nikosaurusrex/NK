@@ -117,9 +117,9 @@ float4 PSMain(VSOutput Input) : SV_TARGET {
 
     if (Input.Type == 1) {
         // Text rendering
-        float3 Sample = Texture.Sample(Sampler, Input.UVCoords).rgb;
-        float Alpha = (Sample.r + Sample.g + Sample.b) / 3.0;
-        FragColor = float4(Input.Color, Alpha);
+        float Sample = Texture.Sample(Sampler, Input.UVCoords).r;
+
+        FragColor = float4(Input.Color, Sample);
     }
 
     FragColor *= CornerFactor;

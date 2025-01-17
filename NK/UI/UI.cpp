@@ -2,6 +2,7 @@
 #include <dxgi.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <d2d1.h>
 
 enum {
     FONT_ATLAS_WIDTH = 512,
@@ -77,6 +78,7 @@ struct GlyphAtlasEntry {
     Vec2 UVPosition;
     Vec2 UVSize;
     Vec2 GlyphSize;
+    float Advance;
 };
 
 struct UIState {
@@ -98,9 +100,7 @@ struct UIState {
     float FontSize;
     float GlyphScale;
 
-    u16 GlyphIndices[FONT_NUM_CHARS];
     GlyphAtlasEntry GlyphEntries[FONT_NUM_CHARS];
-    DWRITE_GLYPH_METRICS GlyphMetrics[FONT_NUM_CHARS];
 };
 
 global UIState UI;
@@ -110,7 +110,7 @@ global IDXGISwapChain *SwapChain;
 global ID3D11RenderTargetView *RenderTargetView;
 global ID3D11BlendState *BlendState;
 
-#define DWriteCall(Call) do {         \
+#define CheckFail(Call) do {         \
     HRESULT HResult = Call;           \
     if (FAILED(HResult)) {            \
          Print("DWrite Call Failed: 0x%x\n", HResult); NK_TRAP(); Exit(1); \
@@ -130,12 +130,12 @@ void InitD3D11(Window *Win) {
     SwapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
 
     // TODO: change flags based on build
-    u32 Flags = D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_DEBUG;
+    u32 Flags = D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_DEBUG;
     D3D_FEATURE_LEVEL Features[] = {
         D3D_FEATURE_LEVEL_11_1,
     };
 
-    DWriteCall(D3D11CreateDeviceAndSwapChain(
+    CheckFail(D3D11CreateDeviceAndSwapChain(
         0,
         D3D_DRIVER_TYPE_HARDWARE,
         0, Flags, Features, ArrayCount(Features),
@@ -148,7 +148,7 @@ void InitD3D11(Window *Win) {
     ));
 
     ID3D11Texture2D* BackBuffer = 0;
-    DWriteCall(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer));
+    CheckFail(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer));
 
     Device->CreateRenderTargetView(BackBuffer, 0, &RenderTargetView);
     BackBuffer->Release();
@@ -163,7 +163,7 @@ void InitD3D11(Window *Win) {
     BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     BlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 
-    DWriteCall(Device->CreateBlendState(&BlendDesc, &BlendState));
+    CheckFail(Device->CreateBlendState(&BlendDesc, &BlendState));
 
     float BlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     u32 SampleMask = 0xFFFFFFFF;
@@ -213,7 +213,7 @@ void LoadShaders() {
     RCmdBufferDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
     RCmdBufferDesc.StructureByteStride = sizeof(UIRenderCommand);
 
-    DWriteCall(Device->CreateBuffer(&RCmdBufferDesc, 0, &UI.RCmdBuffer));
+    CheckFail(Device->CreateBuffer(&RCmdBufferDesc, 0, &UI.RCmdBuffer));
 
     D3D11_SHADER_RESOURCE_VIEW_DESC RCmdBufferViewDesc = {};
     RCmdBufferViewDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -221,7 +221,7 @@ void LoadShaders() {
     RCmdBufferViewDesc.Buffer.FirstElement = 0;
     RCmdBufferViewDesc.Buffer.NumElements = UI_RENDER_GROUP_MAX_ELEMENTS;
 
-    DWriteCall(Device->CreateShaderResourceView(UI.RCmdBuffer, &RCmdBufferViewDesc, &UI.RCmdBufferView));
+    CheckFail(Device->CreateShaderResourceView(UI.RCmdBuffer, &RCmdBufferViewDesc, &UI.RCmdBufferView));
 
     D3D11_BUFFER_DESC WindowConstantsBufferDesc = {};
     WindowConstantsBufferDesc.ByteWidth = sizeof(UIWindowConstants);
@@ -229,7 +229,7 @@ void LoadShaders() {
     WindowConstantsBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     WindowConstantsBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-    DWriteCall(Device->CreateBuffer(&WindowConstantsBufferDesc, 0, &UI.WindowConstantsBuffer));
+    CheckFail(Device->CreateBuffer(&WindowConstantsBufferDesc, 0, &UI.WindowConstantsBuffer));
 
     VertexBlob->Release();
     PixelBlob->Release();
@@ -237,140 +237,27 @@ void LoadShaders() {
 
 void InitDirectWrite() {
 	IDWriteFactory *DWriteFactory = 0;
-    DWriteCall(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown **) &DWriteFactory));
+    CheckFail(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown **) &DWriteFactory));
 
-    IDWriteFontCollection *FontCollection = 0;
-    DWriteCall(DWriteFactory->GetSystemFontCollection(&FontCollection));
-
-    UINT32 FontIndex;
-    BOOL Exists;
-    DWriteCall(FontCollection->FindFamilyName(L"Roboto", &FontIndex, &Exists));
-    if (!Exists) {
-        Print("Font not found.\n");
-        Exit(1);
-    }
-
-    IDWriteFontFamily *FontFamily = 0;
-    DWriteCall(FontCollection->GetFontFamily(FontIndex, &FontFamily));
-
-    IDWriteFont *Font = 0;
-    DWriteCall(FontFamily->GetFont(0, &Font));
-
-    IDWriteFontFace *FontFace = 0;
-    DWriteCall(Font->CreateFontFace(&FontFace));
-
-    for (u32 Char = FONT_FIRST_CHAR; Char <= FONT_LAST_CHAR; ++Char) {
-        u16 GlyphIndex = 0;
-        DWriteCall(FontFace->GetGlyphIndices(&Char, 1, &GlyphIndex));
-        UI.GlyphIndices[Char - FONT_FIRST_CHAR] = GlyphIndex;
-    }
-    
-    DWriteCall(FontFace->GetDesignGlyphMetrics(
-        UI.GlyphIndices,
-        FONT_NUM_CHARS,
-        UI.GlyphMetrics
-    ));
-
-    DWRITE_FONT_METRICS FontMetrics;
-    FontFace->GetMetrics(&FontMetrics);
-    float DesignUnitsPerEm = (float)FontMetrics.designUnitsPerEm;
-
-    UI.FontSize = 20.0f;
-    UI.GlyphScale = UI.FontSize / DesignUnitsPerEm;
-
-    u8 *AtlasData = (u8 *) HeapAlloc(FONT_ATLAS_WIDTH * 4 * FONT_ATLAS_HEIGHT);
-
-    int PenX = 0;
-    int PenY = 0;
-    int RowHeight = 0;
-    for (int i = 0; i < FONT_NUM_CHARS; ++i) {
-        DWRITE_GLYPH_RUN GlyphRun = {};
-        GlyphRun.fontFace = FontFace;
-        GlyphRun.fontEmSize = UI.FontSize;
-        GlyphRun.glyphCount = 1;
-        GlyphRun.glyphIndices = &UI.GlyphIndices[i];
-        GlyphRun.glyphAdvances = 0;
-
-        IDWriteGlyphRunAnalysis *GlyphRunAnalysis = 0;
-        DWriteCall(DWriteFactory->CreateGlyphRunAnalysis(
-            &GlyphRun, 1.0f, 0,
-            DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL,
-            DWRITE_MEASURING_MODE_NATURAL,
-            0.0f, 0.0f, &GlyphRunAnalysis
-        ));
-
-        RECT TextureBounds;
-        DWriteCall(GlyphRunAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &TextureBounds));
-
-        int TextureWidth = TextureBounds.right - TextureBounds.left;
-        int TextureHeight = TextureBounds.bottom - TextureBounds.top;
-        int TextureSize = TextureWidth * TextureHeight * 3;
-
-        u8 *TextureData = (u8 *) HeapAlloc(TextureSize);
-
-        GlyphRunAnalysis->CreateAlphaTexture(
-            DWRITE_TEXTURE_CLEARTYPE_3x1,
-            &TextureBounds,
-            TextureData,
-            TextureSize
-        );
-
-        if (PenX + TextureWidth > FONT_ATLAS_WIDTH) {
-            PenX = 0;
-            PenY += RowHeight;
-            RowHeight = 0;
-        }
-
-        if (TextureHeight > RowHeight) {
-            RowHeight = TextureHeight;
-        }
-
-        for (int Row = 0; Row < TextureHeight; ++Row) {
-            for (int Column = 0; Column < TextureWidth; ++Column) {
-                int TextureIndex = (Row * TextureWidth + Column) * 3;
-                int AtlasIndex = ((PenY + Row) * FONT_ATLAS_WIDTH + (PenX + Column)) * 4;
-
-                AtlasData[AtlasIndex+0] = TextureData[TextureIndex+0];
-                AtlasData[AtlasIndex+1] = TextureData[TextureIndex+1];
-                AtlasData[AtlasIndex+2] = TextureData[TextureIndex+2];
-                AtlasData[AtlasIndex+3] = 255;
-            }
-        }
-
-        GlyphAtlasEntry *GlyphEntry = UI.GlyphEntries + i;
-        GlyphEntry->UVPosition = Vec2(
-            float(PenX) / FONT_ATLAS_WIDTH, float(PenY) / FONT_ATLAS_HEIGHT
-        );
-        GlyphEntry->UVSize = Vec2(
-            float(TextureWidth) / FONT_ATLAS_WIDTH, float(TextureHeight) / FONT_ATLAS_HEIGHT
-        );
-        GlyphEntry->GlyphSize = Vec2(
-            float(TextureWidth), float(TextureHeight)
-        );
-
-        PenX += TextureWidth;
-        HeapFree(TextureData);
-    }
+    ID2D1Factory *D2Factory = 0;
+    D2D1_FACTORY_OPTIONS Options = {};
+    CheckFail(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), &Options, (void **)&D2Factory));
 
     D3D11_TEXTURE2D_DESC AtlasDesc = {};
     AtlasDesc.Width = FONT_ATLAS_WIDTH;
     AtlasDesc.Height = FONT_ATLAS_HEIGHT;
     AtlasDesc.MipLevels = 1;
     AtlasDesc.ArraySize = 1;
-    AtlasDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    AtlasDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     AtlasDesc.SampleDesc.Count = 1;
     AtlasDesc.Usage = D3D11_USAGE_DEFAULT;
-    AtlasDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    AtlasDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
 
-    D3D11_SUBRESOURCE_DATA InitialData = {};
-    InitialData.pSysMem = AtlasData;
-    InitialData.SysMemPitch = FONT_ATLAS_WIDTH * 4;
-
-    DWriteCall(Device->CreateTexture2D(&AtlasDesc, &InitialData, &UI.FontAtlasTexture));
-    DWriteCall(Device->CreateShaderResourceView(UI.FontAtlasTexture, 0, &UI.FontAtlasView));
+    CheckFail(Device->CreateTexture2D(&AtlasDesc, 0, &UI.FontAtlasTexture));
+    CheckFail(Device->CreateShaderResourceView(UI.FontAtlasTexture, 0, &UI.FontAtlasView));
 
     D3D11_SAMPLER_DESC SamplerDesc = {};
-    SamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    SamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     SamplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
     SamplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
     SamplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -378,9 +265,148 @@ void InitDirectWrite() {
     SamplerDesc.MinLOD = 0;
     SamplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
 
-    DWriteCall(Device->CreateSamplerState(&SamplerDesc, &UI.FontAtlasSampler));
+    CheckFail(Device->CreateSamplerState(&SamplerDesc, &UI.FontAtlasSampler));
 
-    HeapFree(AtlasData);
+    IDXGISurface *DxgiSurface;
+    CheckFail(UI.FontAtlasTexture->QueryInterface(IID_PPV_ARGS(&DxgiSurface)));
+
+    D2D1_RENDER_TARGET_PROPERTIES Props =
+        D2D1::RenderTargetProperties(
+                                     D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                                     D2D1::PixelFormat(
+                                                       DXGI_FORMAT_B8G8R8A8_UNORM,
+                                                       D2D1_ALPHA_MODE_PREMULTIPLIED
+                                                      ),
+                                     0, 0
+                                    );
+    ID2D1RenderTarget *RenderTarget;
+    CheckFail(D2Factory->CreateDxgiSurfaceRenderTarget(
+        DxgiSurface,
+        &Props,
+        &RenderTarget
+    ));
+
+    ID2D1SolidColorBrush *FillBrush = 0;
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), &FillBrush);
+
+    UI.FontSize = 12.0f;
+
+    const wchar_t *FontName = L"Roboto";
+    IDWriteTextFormat *TextFormat;
+    CheckFail(DWriteFactory->CreateTextFormat(
+        FontName,
+        0,
+        DWRITE_FONT_WEIGHT_REGULAR,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        UI.FontSize,
+        L"en-us",
+        &TextFormat
+    ));
+
+    IDWriteFontCollection *FontCollection = 0;
+    CheckFail(DWriteFactory->GetSystemFontCollection(&FontCollection));
+
+    UINT32 FontIndex;
+    BOOL Exists;
+    CheckFail(FontCollection->FindFamilyName(FontName, &FontIndex, &Exists));
+    if (!Exists) {
+        Print("Font not found.\n");
+        Exit(1);
+    }
+
+    IDWriteFontFamily *FontFamily = 0;
+    CheckFail(FontCollection->GetFontFamily(FontIndex, &FontFamily));
+
+    IDWriteFont *Font = 0;
+    CheckFail(FontFamily->GetFont(0, &Font));
+
+    IDWriteFontFace *FontFace = 0;
+    CheckFail(Font->CreateFontFace(&FontFace));
+
+   
+    u16 GlyphIndices[FONT_NUM_CHARS];
+    DWRITE_GLYPH_METRICS GlyphMetrics[FONT_NUM_CHARS]; 
+    for (u32 Char = FONT_FIRST_CHAR; Char <= FONT_LAST_CHAR; ++Char) {
+        u16 GlyphIndex = 0;
+        CheckFail(FontFace->GetGlyphIndices(&Char, 1, &GlyphIndex));
+        GlyphIndices[Char - FONT_FIRST_CHAR] = GlyphIndex;
+    }
+    
+    CheckFail(FontFace->GetDesignGlyphMetrics(
+        GlyphIndices,
+        FONT_NUM_CHARS,
+        GlyphMetrics
+    ));
+
+    DWRITE_FONT_METRICS FontMetrics;
+    FontFace->GetMetrics(&FontMetrics);
+    float DesignUnitsPerEm = (float)FontMetrics.designUnitsPerEm;
+    float FontScale = UI.FontSize / DesignUnitsPerEm;
+    
+    RenderTarget->BeginDraw();
+    RenderTarget->Clear();
+
+    float PenX = 0;
+    float PenY = 0;
+    float RowHeight = 0;
+    const float Padding = 2.0f;
+    for (int i = 0; i < FONT_NUM_CHARS; ++i) {
+        wchar_t Char = FONT_FIRST_CHAR + i;
+        IDWriteTextLayout *TextLayout;
+        CheckFail(DWriteFactory->CreateTextLayout(
+            &Char, 1, TextFormat, FONT_ATLAS_WIDTH, FONT_ATLAS_HEIGHT, &TextLayout));
+        
+        DWRITE_TEXT_METRICS Metrics;
+        TextLayout->GetMetrics(&Metrics);
+
+        DWRITE_GLYPH_METRICS GMetrics = GlyphMetrics[i];
+
+        float GlyphWidth = Metrics.widthIncludingTrailingWhitespace;
+        float GlyphHeight = UI.FontSize;
+
+        if (PenX + GlyphWidth + Padding > FONT_ATLAS_WIDTH) {
+            PenX = 0;
+            PenY += RowHeight + Padding;
+            RowHeight = 0;
+        }
+        
+        if (GlyphHeight > RowHeight) {
+            RowHeight = GlyphHeight;
+        }
+
+        D2D1_RECT_F LayoutRect;
+        LayoutRect.left = PenX;
+        LayoutRect.right = PenX + GlyphWidth;
+        LayoutRect.top = PenY;
+        LayoutRect.bottom = PenY + GlyphHeight;
+
+        RenderTarget->DrawText(
+            &Char,
+            1,
+            TextFormat,
+            &LayoutRect,
+            FillBrush,
+            D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+            DWRITE_MEASURING_MODE_NATURAL
+        );
+
+        GlyphAtlasEntry *GlyphEntry = UI.GlyphEntries + i;
+        GlyphEntry->UVPosition = Vec2(
+            PenX / FONT_ATLAS_WIDTH, PenY / FONT_ATLAS_HEIGHT
+        );
+        GlyphEntry->UVSize = Vec2(
+            GlyphWidth / FONT_ATLAS_WIDTH, Metrics.height / FONT_ATLAS_HEIGHT
+        );
+        GlyphEntry->GlyphSize = Vec2(
+            GlyphWidth, Metrics.height
+        );
+        GlyphEntry->Advance = GMetrics.advanceWidth * FontScale;
+
+        PenX += GlyphWidth + Padding;
+    }
+
+    RenderTarget->EndDraw();
 }
 
 void InitUI(Window *Win) {
@@ -421,12 +447,12 @@ void BeginUIFrame(Window *Win) {
             RenderTargetView = 0;
         }
 
-        DWriteCall(SwapChain->ResizeBuffers(2, Width, Height, DXGI_FORMAT_UNKNOWN, 0));
+        CheckFail(SwapChain->ResizeBuffers(2, Width, Height, DXGI_FORMAT_UNKNOWN, 0));
 
         ID3D11Texture2D* BackBuffer = 0;
-        DWriteCall(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer));
+        CheckFail(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer));
 
-        DWriteCall(Device->CreateRenderTargetView(BackBuffer, 0, &RenderTargetView));
+        CheckFail(Device->CreateRenderTargetView(BackBuffer, 0, &RenderTargetView));
         BackBuffer->Release();
 
         DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
@@ -537,15 +563,14 @@ void PushText(String Text, Vec2 Position, u32 Color) {
     float PosX = Position.X;
     float PosY = Position.Y;
 
-    for (int i = 0; i < Text.Length; ++i) {
+    for (u64 i = 0; i < Text.Length; ++i) {
         char Character = Text[i];
 
         int GlyphIndex = Character - FONT_FIRST_CHAR;
         GlyphAtlasEntry GlyphEntry = UI.GlyphEntries[GlyphIndex];
-        DWRITE_GLYPH_METRICS Metrics = UI.GlyphMetrics[GlyphIndex];
 
-        float GlyphOriginX = PosX + Metrics.leftSideBearing * UI.GlyphScale;
-        float GlyphOriginY = PosY + (Metrics.topSideBearing - Metrics.verticalOriginY) * UI.GlyphScale;
+        float GlyphOriginX = PosX;
+        float GlyphOriginY = PosY;
 
         UIRenderCommand Command = {};
         Command.Position = Vec2(GlyphOriginX, GlyphOriginY);
@@ -559,7 +584,7 @@ void PushText(String Text, Vec2 Position, u32 Color) {
 
         PushRenderCommand(Command);
 
-        PosX += (Metrics.advanceWidth + Metrics.rightSideBearing) * UI.GlyphScale;
+        PosX += GlyphEntry.Advance;
     }
 }
 
@@ -567,7 +592,23 @@ void PushTextCentered(String Text, UIBox Box, u32 Color) {
     Vec2 Position = Box.Position;
     Vec2 Size = Box.Size;
 
-    Vec2 TextPos = Position;
+    float TextWidth = 0;
+    float TextHeight = UI.FontSize;
+
+    for (u64 i = 0; i < Text.Length; ++i) {
+        char Character = Text[i];
+
+        int GlyphIndex = Character - FONT_FIRST_CHAR;
+        if (GlyphIndex < 0 || GlyphIndex >= FONT_NUM_CHARS) continue;
+
+        GlyphAtlasEntry GlyphEntry = UI.GlyphEntries[GlyphIndex];
+        TextWidth += GlyphEntry.Advance;
+    }
+
+    // Center the text in the box
+    Vec2 TextPos = {};
+    TextPos.X = Position.X + (Size.X - TextWidth) * 0.5f;
+    TextPos.Y = Position.Y + (Size.Y - TextHeight) * 0.5f;
 
     PushText(Text, TextPos, Color);
 }
@@ -647,7 +688,7 @@ b8 UIButton(String Text, Vec2 Position, Vec2 Size) {
     b8 Result = 0;
 
     UIBox Box = {Position, Size};
-    UIInteraction Interaction = {&Result, UI_INTERACTION_PRESS}; 
+    UIInteraction Interaction = {{&Result}, UI_INTERACTION_PRESS}; 
 
     u32 InteractionFlags = HandleUIInteraction(Box, Interaction);
     u32 RenderFlags = UI_DRAW_HOVERED | UI_DRAW_BORDER;
@@ -662,7 +703,7 @@ b8 UIToggleButton(b8 *Value, String Text, Vec2 Position, Vec2 Size) {
     b8 Result = 0;
 
     UIBox Box = {Position, Size};
-    UIInteraction Interaction = {Value, UI_INTERACTION_TOGGLE}; 
+    UIInteraction Interaction = {{Value}, UI_INTERACTION_TOGGLE}; 
 
     u32 InteractionFlags = HandleUIInteraction(Box, Interaction);
     u32 RenderFlags = UI_DRAW_ACTIVE | UI_DRAW_HOVERED | UI_DRAW_BORDER;

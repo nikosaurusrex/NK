@@ -18,7 +18,7 @@ struct OS_FileInfo {
     u64 Size;
 };
 
-typedef void (*ThreadFunc)(void *Args);
+typedef u32 (*ThreadFunc)(void *Args);
 
 struct TaskQueue;
 typedef void (*TaskFunc)(TaskQueue *Queue, void *Pointer);
