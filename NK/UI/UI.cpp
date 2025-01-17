@@ -1,8 +1,3 @@
-IGNORE_WARNINGS_BEGIN
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-// #include "../ThirdParty/stb_image_write.h"
-IGNORE_WARNINGS_END
-
 #include <dwrite.h>
 #include <dxgi.h>
 #include <d3d11.h>
@@ -78,6 +73,12 @@ struct UIInteraction {
     u32 Type;
 };
 
+struct GlyphAtlasEntry {
+    Vec2 UVPosition;
+    Vec2 UVSize;
+    Vec2 GlyphSize;
+};
+
 struct UIState {
     Arena RenderGroupArena;
 
@@ -90,8 +91,15 @@ struct UIState {
     ID3D11VertexShader *VertexShader;
     ID3D11PixelShader *PixelShader;
 
+    ID3D11Texture2D *FontAtlasTexture;
+    ID3D11ShaderResourceView *FontAtlasView;
+    ID3D11SamplerState *FontAtlasSampler;
+
+    float FontSize;
+    float GlyphScale;
+
     u16 GlyphIndices[FONT_NUM_CHARS];
-    float GlyphAdvances[FONT_NUM_CHARS];
+    GlyphAtlasEntry GlyphEntries[FONT_NUM_CHARS];
     DWRITE_GLYPH_METRICS GlyphMetrics[FONT_NUM_CHARS];
 };
 
@@ -100,6 +108,7 @@ global ID3D11Device *Device;
 global ID3D11DeviceContext *DeviceContext;
 global IDXGISwapChain *SwapChain;
 global ID3D11RenderTargetView *RenderTargetView;
+global ID3D11BlendState *BlendState;
 
 #define DWriteCall(Call) do {         \
     HRESULT HResult = Call;           \
@@ -144,6 +153,21 @@ void InitD3D11(Window *Win) {
     Device->CreateRenderTargetView(BackBuffer, 0, &RenderTargetView);
     BackBuffer->Release();
 
+    D3D11_BLEND_DESC BlendDesc = {};
+    BlendDesc.RenderTarget[0].BlendEnable = TRUE;
+    BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+    BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    BlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+    DWriteCall(Device->CreateBlendState(&BlendDesc, &BlendState));
+
+    float BlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    u32 SampleMask = 0xFFFFFFFF;
+    DeviceContext->OMSetBlendState(BlendState, BlendFactor, SampleMask);
     DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
 
     D3D11_VIEWPORT Viewport = {};
@@ -247,7 +271,14 @@ void InitDirectWrite() {
         UI.GlyphMetrics
     ));
 
-    u8 *AtlasData = (u8 *) HeapAlloc(FONT_ATLAS_WIDTH * 3 * FONT_ATLAS_HEIGHT);
+    DWRITE_FONT_METRICS FontMetrics;
+    FontFace->GetMetrics(&FontMetrics);
+    float DesignUnitsPerEm = (float)FontMetrics.designUnitsPerEm;
+
+    UI.FontSize = 20.0f;
+    UI.GlyphScale = UI.FontSize / DesignUnitsPerEm;
+
+    u8 *AtlasData = (u8 *) HeapAlloc(FONT_ATLAS_WIDTH * 4 * FONT_ATLAS_HEIGHT);
 
     int PenX = 0;
     int PenY = 0;
@@ -255,10 +286,10 @@ void InitDirectWrite() {
     for (int i = 0; i < FONT_NUM_CHARS; ++i) {
         DWRITE_GLYPH_RUN GlyphRun = {};
         GlyphRun.fontFace = FontFace;
-        GlyphRun.fontEmSize = 32.0f;
+        GlyphRun.fontEmSize = UI.FontSize;
         GlyphRun.glyphCount = 1;
         GlyphRun.glyphIndices = &UI.GlyphIndices[i];
-        GlyphRun.glyphAdvances = &UI.GlyphAdvances[i];
+        GlyphRun.glyphAdvances = 0;
 
         IDWriteGlyphRunAnalysis *GlyphRunAnalysis = 0;
         DWriteCall(DWriteFactory->CreateGlyphRunAnalysis(
@@ -271,19 +302,20 @@ void InitDirectWrite() {
         RECT TextureBounds;
         DWriteCall(GlyphRunAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &TextureBounds));
 
-        int TextureWidth = (TextureBounds.right - TextureBounds.left) * 3;
+        int TextureWidth = TextureBounds.right - TextureBounds.left;
         int TextureHeight = TextureBounds.bottom - TextureBounds.top;
+        int TextureSize = TextureWidth * TextureHeight * 3;
 
-        u8 *TextureData = (u8 *) HeapAlloc(TextureWidth * TextureHeight);
+        u8 *TextureData = (u8 *) HeapAlloc(TextureSize);
 
         GlyphRunAnalysis->CreateAlphaTexture(
             DWRITE_TEXTURE_CLEARTYPE_3x1,
             &TextureBounds,
             TextureData,
-            TextureWidth * TextureHeight
+            TextureSize
         );
 
-        if (PenX + TextureWidth > FONT_ATLAS_WIDTH * 3) {
+        if (PenX + TextureWidth > FONT_ATLAS_WIDTH) {
             PenX = 0;
             PenY += RowHeight;
             RowHeight = 0;
@@ -295,15 +327,58 @@ void InitDirectWrite() {
 
         for (int Row = 0; Row < TextureHeight; ++Row) {
             for (int Column = 0; Column < TextureWidth; ++Column) {
-                int Index = (PenY + Row) * (FONT_ATLAS_WIDTH * 3) + (PenX + Column);
-                u8 D = TextureData[Row * TextureWidth + Column];
-                AtlasData[Index] = D;
+                int TextureIndex = (Row * TextureWidth + Column) * 3;
+                int AtlasIndex = ((PenY + Row) * FONT_ATLAS_WIDTH + (PenX + Column)) * 4;
+
+                AtlasData[AtlasIndex+0] = TextureData[TextureIndex+0];
+                AtlasData[AtlasIndex+1] = TextureData[TextureIndex+1];
+                AtlasData[AtlasIndex+2] = TextureData[TextureIndex+2];
+                AtlasData[AtlasIndex+3] = 255;
             }
         }
+
+        GlyphAtlasEntry *GlyphEntry = UI.GlyphEntries + i;
+        GlyphEntry->UVPosition = Vec2(
+            float(PenX) / FONT_ATLAS_WIDTH, float(PenY) / FONT_ATLAS_HEIGHT
+        );
+        GlyphEntry->UVSize = Vec2(
+            float(TextureWidth) / FONT_ATLAS_WIDTH, float(TextureHeight) / FONT_ATLAS_HEIGHT
+        );
+        GlyphEntry->GlyphSize = Vec2(
+            float(TextureWidth), float(TextureHeight)
+        );
 
         PenX += TextureWidth;
         HeapFree(TextureData);
     }
+
+    D3D11_TEXTURE2D_DESC AtlasDesc = {};
+    AtlasDesc.Width = FONT_ATLAS_WIDTH;
+    AtlasDesc.Height = FONT_ATLAS_HEIGHT;
+    AtlasDesc.MipLevels = 1;
+    AtlasDesc.ArraySize = 1;
+    AtlasDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    AtlasDesc.SampleDesc.Count = 1;
+    AtlasDesc.Usage = D3D11_USAGE_DEFAULT;
+    AtlasDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    D3D11_SUBRESOURCE_DATA InitialData = {};
+    InitialData.pSysMem = AtlasData;
+    InitialData.SysMemPitch = FONT_ATLAS_WIDTH * 4;
+
+    DWriteCall(Device->CreateTexture2D(&AtlasDesc, &InitialData, &UI.FontAtlasTexture));
+    DWriteCall(Device->CreateShaderResourceView(UI.FontAtlasTexture, 0, &UI.FontAtlasView));
+
+    D3D11_SAMPLER_DESC SamplerDesc = {};
+    SamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    SamplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    SamplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    SamplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    SamplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    SamplerDesc.MinLOD = 0;
+    SamplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+
+    DWriteCall(Device->CreateSamplerState(&SamplerDesc, &UI.FontAtlasSampler));
 
     HeapFree(AtlasData);
 }
@@ -317,18 +392,20 @@ void InitUI(Window *Win) {
 }
 
 void DestroyUI() {
-    if (RenderTargetView) {
-        RenderTargetView->Release();
-    }
-    if (SwapChain) {
-        SwapChain->Release();
-    }
-    if (DeviceContext) {
-        DeviceContext->Release();
-    }
-    if (Device) {
-        Device->Release();
-    }
+    if (UI.WindowConstantsBuffer) UI.WindowConstantsBuffer->Release();
+    if (UI.RCmdBuffer) UI.RCmdBuffer->Release();
+    if (UI.RCmdBufferView) UI.RCmdBufferView->Release();
+    if (UI.VertexShader) UI.VertexShader->Release();
+    if (UI.PixelShader) UI.PixelShader->Release();
+    if (UI.FontAtlasTexture) UI.FontAtlasTexture->Release();
+    if (UI.FontAtlasView) UI.FontAtlasView->Release();
+    if (UI.FontAtlasSampler) UI.FontAtlasSampler->Release();
+    if (BlendState) BlendState->Release();
+    if (RenderTargetView) RenderTargetView->Release();
+    if (SwapChain) SwapChain->Release();
+    if (DeviceContext) DeviceContext->Release();
+    if (Device) Device->Release();
+
     FreeArena(&UI.RenderGroupArena);
 }
 
@@ -381,10 +458,16 @@ void BeginUIFrame(Window *Win) {
 }
 
 void EndUIFrame() {
+    float BlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    u32 SampleMask = 0xFFFFFFFF;
+    DeviceContext->OMSetBlendState(BlendState, BlendFactor, SampleMask);
     DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
 
     DeviceContext->VSSetShaderResources(0, 1, &UI.RCmdBufferView);
     DeviceContext->VSSetConstantBuffers(0, 1, &UI.WindowConstantsBuffer);
+
+    DeviceContext->PSSetShaderResources(0, 1, &UI.FontAtlasView);
+    DeviceContext->PSSetSamplers(0, 1, &UI.FontAtlasSampler);
 
     DeviceContext->VSSetShader(UI.VertexShader, 0, 0);
     DeviceContext->PSSetShader(UI.PixelShader, 0, 0);
@@ -454,13 +537,37 @@ void PushText(String Text, Vec2 Position, u32 Color) {
     float PosX = Position.X;
     float PosY = Position.Y;
 
+    for (int i = 0; i < Text.Length; ++i) {
+        char Character = Text[i];
+
+        int GlyphIndex = Character - FONT_FIRST_CHAR;
+        GlyphAtlasEntry GlyphEntry = UI.GlyphEntries[GlyphIndex];
+        DWRITE_GLYPH_METRICS Metrics = UI.GlyphMetrics[GlyphIndex];
+
+        float GlyphOriginX = PosX + Metrics.leftSideBearing * UI.GlyphScale;
+        float GlyphOriginY = PosY + (Metrics.topSideBearing - Metrics.verticalOriginY) * UI.GlyphScale;
+
+        UIRenderCommand Command = {};
+        Command.Position = Vec2(GlyphOriginX, GlyphOriginY);
+        Command.Size = GlyphEntry.GlyphSize;
+        Command.Color = Color;
+        Command.Rounding = 0;
+        Command.Border = 0;
+        Command.Type = UI_TEXT;
+        Command.UVPosition = GlyphEntry.UVPosition;
+        Command.UVSize = GlyphEntry.UVSize;
+
+        PushRenderCommand(Command);
+
+        PosX += (Metrics.advanceWidth + Metrics.rightSideBearing) * UI.GlyphScale;
+    }
 }
 
 void PushTextCentered(String Text, UIBox Box, u32 Color) {
     Vec2 Position = Box.Position;
     Vec2 Size = Box.Size;
 
-    Vec2 TextPos = Vec2();
+    Vec2 TextPos = Position;
 
     PushText(Text, TextPos, Color);
 }

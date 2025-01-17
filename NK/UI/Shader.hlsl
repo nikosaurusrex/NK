@@ -16,6 +16,9 @@ cbuffer WindowConstants : register(b0) {
     float2 Placeholder;
 };
 
+Texture2D Texture : register(t0);
+SamplerState Sampler : register(s0);
+
 struct VSOutput {
     float4 Position : SV_POSITION;
     float3 Color : COLOR0;
@@ -39,11 +42,11 @@ static const float2 VertexPositions[6] = {
 
 static const float2 UVPositions[6] = {
     float2(0, 1),
+    float2(1, 0),
     float2(0, 0),
-    float2(1, 0),
     float2(0, 1),
-    float2(1, 0),
-    float2(1, 1)
+    float2(1, 1),
+    float2(1, 0)
 };
 
 float3 UnpackColor(uint Hex) {
@@ -114,7 +117,9 @@ float4 PSMain(VSOutput Input) : SV_TARGET {
 
     if (Input.Type == 1) {
         // Text rendering
-        // FragColor = float4(Texture.Sample(Sampler, Input.PassUVCoords).r, 1.0, 1.0, 1.0);
+        float3 Sample = Texture.Sample(Sampler, Input.UVCoords).rgb;
+        float Alpha = (Sample.r + Sample.g + Sample.b) / 3.0;
+        FragColor = float4(Input.Color, Alpha);
     }
 
     FragColor *= CornerFactor;
