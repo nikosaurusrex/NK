@@ -92,3 +92,11 @@ struct String {
         return !operator==(Str);
     }
 };
+
+#if OS_WINDOWS
+typedef wchar_t * NativeString;
+#define MakeNativeString(Literal) ((wchar_t *) L##Literal)
+#else
+typedef char * NativeString;
+typedef MakeNativeString(Literal) ((char *) Literal)
+#endif

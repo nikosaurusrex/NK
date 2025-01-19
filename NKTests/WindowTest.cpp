@@ -3,6 +3,7 @@
 #include "NK/WindowLayer.h"
 #include "NK/MathLayer.h"
 #include "NK/DataStructuresLayer.h"
+#include "NK/GraphicsLayer.h"
 #include "NK/UILayer.h"
 
 void NKMain() {
@@ -16,10 +17,12 @@ void NKMain() {
         Exit(1);
     }
 
+    InitGraphics(&MainWindow);
     InitUI(&MainWindow);
 
     while (MainWindow.Running) {
         UpdateWindow(&MainWindow);
+        UpdateGraphics(&MainWindow);
 
         BeginUIFrame(&MainWindow);
 
@@ -37,5 +40,6 @@ void NKMain() {
     }
 
     DestroyUI();
+    ReleaseGraphics();
     DestroyWindow(&MainWindow);
 }

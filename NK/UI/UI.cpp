@@ -1,7 +1,5 @@
 #include <dwrite.h>
 #include <dxgi.h>
-#include <d3d11.h>
-#include <d3dcompiler.h>
 #include <d2d1.h>
 
 enum {
@@ -87,15 +85,12 @@ struct UIState {
     UIRenderGroup *FirstRenderGroup;
     UIRenderGroup *CurrentRenderGroup;
 
-    ID3D11Buffer *WindowConstantsBuffer;
-    ID3D11Buffer *RCmdBuffer;
-    ID3D11ShaderResourceView *RCmdBufferView;
-    ID3D11VertexShader *VertexShader;
-    ID3D11PixelShader *PixelShader;
+    GBuffer WindowConstantsBuffer;
+    GBuffer RCmdBuffer;
 
-    ID3D11Texture2D *FontAtlasTexture;
-    ID3D11ShaderResourceView *FontAtlasView;
-    ID3D11SamplerState *FontAtlasSampler;
+    GShader Shader;
+
+    GTexture FontAtlasTexture;
 
     float FontSize;
     float GlyphScale;
@@ -104,136 +99,6 @@ struct UIState {
 };
 
 global UIState UI;
-global ID3D11Device *Device;
-global ID3D11DeviceContext *DeviceContext;
-global IDXGISwapChain *SwapChain;
-global ID3D11RenderTargetView *RenderTargetView;
-global ID3D11BlendState *BlendState;
-
-#define CheckFail(Call) do {         \
-    HRESULT HResult = Call;           \
-    if (FAILED(HResult)) {            \
-         Print("DWrite Call Failed: 0x%x\n", HResult); NK_TRAP(); Exit(1); \
-    }                                 \
-} while (0);
-
-void InitD3D11(Window *Win) {
-    DXGI_SWAP_CHAIN_DESC SwapChainDesc = {};
-    SwapChainDesc.BufferCount = 2;
-    SwapChainDesc.BufferDesc.Width = Win->Size.X;
-    SwapChainDesc.BufferDesc.Height = Win->Size.Y;
-    SwapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    SwapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    SwapChainDesc.OutputWindow = Win->Handle;
-    SwapChainDesc.SampleDesc.Count = 1;
-    SwapChainDesc.Windowed = TRUE;
-    SwapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-
-    // TODO: change flags based on build
-    u32 Flags = D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_DEBUG;
-    D3D_FEATURE_LEVEL Features[] = {
-        D3D_FEATURE_LEVEL_11_1,
-    };
-
-    CheckFail(D3D11CreateDeviceAndSwapChain(
-        0,
-        D3D_DRIVER_TYPE_HARDWARE,
-        0, Flags, Features, ArrayCount(Features),
-        D3D11_SDK_VERSION,
-        &SwapChainDesc,
-        &SwapChain,
-        &Device,
-        0,
-        &DeviceContext
-    ));
-
-    ID3D11Texture2D* BackBuffer = 0;
-    CheckFail(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer));
-
-    Device->CreateRenderTargetView(BackBuffer, 0, &RenderTargetView);
-    BackBuffer->Release();
-
-    D3D11_BLEND_DESC BlendDesc = {};
-    BlendDesc.RenderTarget[0].BlendEnable = TRUE;
-    BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-    BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-    BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-    BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-    BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    BlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-
-    CheckFail(Device->CreateBlendState(&BlendDesc, &BlendState));
-
-    float BlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-    u32 SampleMask = 0xFFFFFFFF;
-    DeviceContext->OMSetBlendState(BlendState, BlendFactor, SampleMask);
-    DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
-
-    D3D11_VIEWPORT Viewport = {};
-    Viewport.Width = float(Win->Size.X);
-    Viewport.Height = float(Win->Size.Y);
-    Viewport.MinDepth = 0.0f;
-    Viewport.MaxDepth = 1.0f;
-    DeviceContext->RSSetViewports(1, &Viewport);
-    
-    DeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-}
-
-void CompileShader(LPCWSTR FilePath, LPCSTR EntryPoint, LPCSTR Target, ID3DBlob **Blob) {
-    ID3DBlob *Error = 0;
-    HRESULT HResult = D3DCompileFromFile(FilePath, 0, 0, EntryPoint, Target, 0, 0, Blob, &Error);
-
-    if (FAILED(HResult)) {
-        if (Error) {
-            PrintLiteral((char *) Error->GetBufferPointer());
-            Error->Release();
-        }
-    }
-    if (Error) {
-        Error->Release();
-    }
-}
-
-void LoadShaders() {
-    ID3DBlob *VertexBlob = 0;
-    ID3DBlob *PixelBlob = 0;
-
-    CompileShader(L"NK/UI/Shader.hlsl", "VSMain", "vs_5_0", &VertexBlob);
-    CompileShader(L"NK/UI/Shader.hlsl", "PSMain", "ps_5_0", &PixelBlob);
-
-    Device->CreateVertexShader(VertexBlob->GetBufferPointer(), VertexBlob->GetBufferSize(), 0, &UI.VertexShader);
-    Device->CreatePixelShader(PixelBlob->GetBufferPointer(), PixelBlob->GetBufferSize(), 0, &UI.PixelShader);
-
-    D3D11_BUFFER_DESC RCmdBufferDesc = {};
-    RCmdBufferDesc.ByteWidth = UI_RENDER_BUFFER_SIZE;
-    RCmdBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
-    RCmdBufferDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    RCmdBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    RCmdBufferDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-    RCmdBufferDesc.StructureByteStride = sizeof(UIRenderCommand);
-
-    CheckFail(Device->CreateBuffer(&RCmdBufferDesc, 0, &UI.RCmdBuffer));
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC RCmdBufferViewDesc = {};
-    RCmdBufferViewDesc.Format = DXGI_FORMAT_UNKNOWN;
-    RCmdBufferViewDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-    RCmdBufferViewDesc.Buffer.FirstElement = 0;
-    RCmdBufferViewDesc.Buffer.NumElements = UI_RENDER_GROUP_MAX_ELEMENTS;
-
-    CheckFail(Device->CreateShaderResourceView(UI.RCmdBuffer, &RCmdBufferViewDesc, &UI.RCmdBufferView));
-
-    D3D11_BUFFER_DESC WindowConstantsBufferDesc = {};
-    WindowConstantsBufferDesc.ByteWidth = sizeof(UIWindowConstants);
-    WindowConstantsBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
-    WindowConstantsBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    WindowConstantsBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-
-    CheckFail(Device->CreateBuffer(&WindowConstantsBufferDesc, 0, &UI.WindowConstantsBuffer));
-
-    VertexBlob->Release();
-    PixelBlob->Release();
-}
 
 void InitDirectWrite() {
 	IDWriteFactory *DWriteFactory = 0;
@@ -243,32 +108,15 @@ void InitDirectWrite() {
     D2D1_FACTORY_OPTIONS Options = {};
     CheckFail(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), &Options, (void **)&D2Factory));
 
-    D3D11_TEXTURE2D_DESC AtlasDesc = {};
-    AtlasDesc.Width = FONT_ATLAS_WIDTH;
-    AtlasDesc.Height = FONT_ATLAS_HEIGHT;
-    AtlasDesc.MipLevels = 1;
-    AtlasDesc.ArraySize = 1;
-    AtlasDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    AtlasDesc.SampleDesc.Count = 1;
-    AtlasDesc.Usage = D3D11_USAGE_DEFAULT;
-    AtlasDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-
-    CheckFail(Device->CreateTexture2D(&AtlasDesc, 0, &UI.FontAtlasTexture));
-    CheckFail(Device->CreateShaderResourceView(UI.FontAtlasTexture, 0, &UI.FontAtlasView));
-
-    D3D11_SAMPLER_DESC SamplerDesc = {};
-    SamplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    SamplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    SamplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    SamplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    SamplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
-    SamplerDesc.MinLOD = 0;
-    SamplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
-
-    CheckFail(Device->CreateSamplerState(&SamplerDesc, &UI.FontAtlasSampler));
+    UI.FontAtlasTexture = CreateTexture(
+        FONT_ATLAS_WIDTH,
+        FONT_ATLAS_HEIGHT,
+        TEXTURE_FORMAT_BGRA_UNORM,
+        TEXTURE_RENDER_TARGET
+    );
 
     IDXGISurface *DxgiSurface;
-    CheckFail(UI.FontAtlasTexture->QueryInterface(IID_PPV_ARGS(&DxgiSurface)));
+    CheckFail(UI.FontAtlasTexture.Handle->QueryInterface(IID_PPV_ARGS(&DxgiSurface)));
 
     D2D1_RENDER_TARGET_PROPERTIES Props =
         D2D1::RenderTargetProperties(
@@ -324,7 +172,6 @@ void InitDirectWrite() {
     IDWriteFontFace *FontFace = 0;
     CheckFail(Font->CreateFontFace(&FontFace));
 
-   
     u16 GlyphIndices[FONT_NUM_CHARS];
     DWRITE_GLYPH_METRICS GlyphMetrics[FONT_NUM_CHARS]; 
     for (u32 Char = FONT_FIRST_CHAR; Char <= FONT_LAST_CHAR; ++Char) {
@@ -412,71 +259,42 @@ void InitDirectWrite() {
 void InitUI(Window *Win) {
     UI.RenderGroupArena = CreateArena(Megabytes(16));
 
-    InitD3D11(Win);
-    LoadShaders();
+    UI.Shader = LoadShader(MakeNativeString("NK/UI/Shader.hlsl"), MakeNativeString("NK/UI/Shader.hlsl"));
+
+    UI.WindowConstantsBuffer = CreateBuffer(
+        BUFFER_CONSTANT,
+        sizeof(UIWindowConstants),
+        0, 0, 0, 0
+    );
+    UI.RCmdBuffer = CreateBuffer(
+        BUFFER_STRUCTURED,
+        UI_RENDER_BUFFER_SIZE,
+        sizeof(UIRenderCommand),
+        0,
+        UI_RENDER_GROUP_MAX_ELEMENTS,
+        0
+    );
+
     InitDirectWrite();
 }
 
 void DestroyUI() {
-    if (UI.WindowConstantsBuffer) UI.WindowConstantsBuffer->Release();
-    if (UI.RCmdBuffer) UI.RCmdBuffer->Release();
-    if (UI.RCmdBufferView) UI.RCmdBufferView->Release();
-    if (UI.VertexShader) UI.VertexShader->Release();
-    if (UI.PixelShader) UI.PixelShader->Release();
-    if (UI.FontAtlasTexture) UI.FontAtlasTexture->Release();
-    if (UI.FontAtlasView) UI.FontAtlasView->Release();
-    if (UI.FontAtlasSampler) UI.FontAtlasSampler->Release();
-    if (BlendState) BlendState->Release();
-    if (RenderTargetView) RenderTargetView->Release();
-    if (SwapChain) SwapChain->Release();
-    if (DeviceContext) DeviceContext->Release();
-    if (Device) Device->Release();
+    ReleaseBuffer(UI.WindowConstantsBuffer);
+    ReleaseBuffer(UI.RCmdBuffer);
+    
+    ReleaseShader(UI.Shader);
+
+    ReleaseTexture(UI.FontAtlasTexture);
 
     FreeArena(&UI.RenderGroupArena);
 }
 
 void BeginUIFrame(Window *Win) {
-    int Width = Win->Size.X;
-    int Height = Win->Size.Y;
-
-    if (Win->Resized) {
-        if (!DeviceContext || !SwapChain) return;
-
-        if (RenderTargetView) {
-            RenderTargetView->Release();
-            RenderTargetView = 0;
-        }
-
-        CheckFail(SwapChain->ResizeBuffers(2, Width, Height, DXGI_FORMAT_UNKNOWN, 0));
-
-        ID3D11Texture2D* BackBuffer = 0;
-        CheckFail(SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer));
-
-        CheckFail(Device->CreateRenderTargetView(BackBuffer, 0, &RenderTargetView));
-        BackBuffer->Release();
-
-        DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
-
-        D3D11_VIEWPORT Viewport = {};
-        Viewport.Width = float(Width);
-        Viewport.Height = float(Height);
-        Viewport.MinDepth = 0.0f;
-        Viewport.MaxDepth = 1.0f;
-
-        DeviceContext->RSSetViewports(1, &Viewport);
-    }
-
-    float ClearColor[4] = { 0.0f, 0.2f, 0.4f, 1.0f };
-    DeviceContext->ClearRenderTargetView(RenderTargetView, ClearColor);
-
     UIWindowConstants WindowConstants = {};
     WindowConstants.Size.X = Win->Size.X;
     WindowConstants.Size.Y = Win->Size.Y;
 
-    D3D11_MAPPED_SUBRESOURCE Mapped;
-    DeviceContext->Map(UI.WindowConstantsBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &Mapped);
-    CopyMemory(Mapped.pData, &WindowConstants, sizeof(UIWindowConstants));
-    DeviceContext->Unmap(UI.WindowConstantsBuffer, 0);
+    UpdateBuffer(UI.WindowConstantsBuffer, &WindowConstants, sizeof(UIWindowConstants));
 
     ResetArena(&UI.RenderGroupArena);
     UI.FirstRenderGroup = 0;
@@ -484,30 +302,20 @@ void BeginUIFrame(Window *Win) {
 }
 
 void EndUIFrame() {
-    float BlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-    u32 SampleMask = 0xFFFFFFFF;
-    DeviceContext->OMSetBlendState(BlendState, BlendFactor, SampleMask);
-    DeviceContext->OMSetRenderTargets(1, &RenderTargetView, 0);
+    BindBuffer(UI.RCmdBuffer, SHADER_VERTEX);
+    BindBuffer(UI.WindowConstantsBuffer, SHADER_VERTEX);
 
-    DeviceContext->VSSetShaderResources(0, 1, &UI.RCmdBufferView);
-    DeviceContext->VSSetConstantBuffers(0, 1, &UI.WindowConstantsBuffer);
+    BindTexture(UI.FontAtlasTexture, SHADER_PIXEL);
 
-    DeviceContext->PSSetShaderResources(0, 1, &UI.FontAtlasView);
-    DeviceContext->PSSetSamplers(0, 1, &UI.FontAtlasSampler);
-
-    DeviceContext->VSSetShader(UI.VertexShader, 0, 0);
-    DeviceContext->PSSetShader(UI.PixelShader, 0, 0);
+    BindShader(UI.Shader);
 
     UIRenderGroup *RenderGroup = UI.FirstRenderGroup;
     while (RenderGroup) {
         u64 Size = RenderGroup->CommandCount * sizeof(UIRenderCommand);
 
-        D3D11_MAPPED_SUBRESOURCE Mapped;
-        DeviceContext->Map(UI.RCmdBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &Mapped);
-        CopyMemory(Mapped.pData, RenderGroup->Commands, Size);
-        DeviceContext->Unmap(UI.RCmdBuffer, 0);
+        UpdateBuffer(UI.RCmdBuffer, RenderGroup->Commands, Size);
 
-        DeviceContext->DrawInstanced(6, RenderGroup->CommandCount, 0, 0);
+        DrawInstanced(RenderGroup->CommandCount, 6);
 
         RenderGroup = RenderGroup->Next;
     }
