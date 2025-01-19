@@ -176,6 +176,7 @@ void BindShader(GShader Shader) {
 
 GBuffer CreateBuffer(u32 Type, u32 Size, u32 Stride, b8 IsStatic, u32 NumElements, void *Data) {
     GBuffer Result = {};
+    Result.Type = Type;
 
     u32 MiscFlags = 0;
     u32 UsageFlags = 0;
