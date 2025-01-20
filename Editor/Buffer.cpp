@@ -1,6 +1,5 @@
 enum {
     MAX_GAP_SIZE = 16,
-    TAB_SIZE = 4
 };
 
 nkinline int CharType(u8 Char) {
@@ -179,14 +178,13 @@ u64 InsertLine(GapBuffer *Buffer, u64 Position, b32 AutoIndent) {
 
         Position = InsertChar(Buffer, '\n', Position);
 
-    /*
-    for (u64 i = 0; i < Indent / TAB_SIZE; ++i) {
-     Position = insert_char(Buffer, '\t', Position);
-    }
+        for (u64 i = 0; i < Indent / TAB_SIZE; ++i) {
+            Position = InsertChar(Buffer, '\t', Position);
+        }
 
-    for (u64 i = 0; i < Indent % TAB_SIZE; ++i) {
-     Position = insert_char(Buffer, ' ', Position);
-    }*/
+        for (u64 i = 0; i < Indent % TAB_SIZE; ++i) {
+            Position = InsertChar(Buffer, ' ', Position);
+        }
     } else {
         Position = InsertChar(Buffer, '\n', Position);
     }
@@ -298,7 +296,7 @@ void PaneCursorNext(Pane *P) {
     PaneResetColStore(P);
 }
 
-void PanesetCursor(Pane *P, u64 Cursor) {
+void PaneSetCursor(Pane *P, u64 Cursor) {
     P->Cursor = Cursor;
     PaneResetColStore(P);
 
@@ -311,14 +309,10 @@ void PaneResetColStore(Pane *P) {
 
 void UpdateScroll(Pane *P) {
     u32 CursorLine = 0;
-    u64 CursorColumn = 0;
 
     for (u64 i = 0; i < P->Cursor; ++i) {
         if (P->Buffer[i] == '\n') {
             CursorLine++;
-            CursorColumn = 0;
-        } else {
-            CursorColumn++;
         }
     }
 

@@ -19,6 +19,14 @@ static LRESULT CALLBACK WindowProc(HWND Handle, UINT uMsg, WPARAM wParam, LPARAM
             BeginPaint(Handle, &Ps);
             EndPaint(Handle, &Ps);
         } break;
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN: {
+            if (Win->KeyCallback) {
+                if ((lParam & 0x80000000) == 0) {
+                    Win->KeyCallback(wParam);
+                }
+            }
+        } break;
         case WM_CHAR: {
             WCHAR UTF16Char = (WCHAR)wParam;
             char ASCIIChar;
@@ -27,6 +35,12 @@ static LRESULT CALLBACK WindowProc(HWND Handle, UINT uMsg, WPARAM wParam, LPARAM
                 Input.Text[Input.TextLength] = ASCIIChar;
                 Input.Text[Input.TextLength + 1] = 0;
                 Input.TextLength++;
+            }
+
+            if (Win->CharCallback) {
+                if ((lParam & 0x80000000) == 0) {
+                    Win->CharCallback(ASCIIChar);
+                }
             }
         } break;
         case WM_INPUT: {

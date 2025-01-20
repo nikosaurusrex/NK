@@ -100,3 +100,8 @@ typedef wchar_t * NativeString;
 typedef char * NativeString;
 typedef MakeNativeString(Literal) ((char *) Literal)
 #endif
+
+inline b32 IsDigit(char Char) {
+    return ('A' <= Char && Char <= 'Z')
+        || ('a' <= Char && Char <= 'z');
+}

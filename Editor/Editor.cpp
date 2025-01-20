@@ -5,7 +5,9 @@
 #include "NK/DataStructuresLayer.h"
 
 #include "Buffer.h"
+#include "Editor.h"
 #include "Buffer.cpp"
+#include "Keymaps.cpp"
 
 #include <dwrite.h>
 #include <d2d1.h>
@@ -27,6 +29,8 @@ global ID2D1HwndRenderTarget *RenderTarget;
 global IDWriteTextFormat *TextFormat;
 global ID2D1SolidColorBrush *FillBrush;
 
+global TextEditor Editor;
+
 void DrawPane(Pane *ToDraw) {
     GapBuffer *Buffer = &ToDraw->Buffer;
 
@@ -39,6 +43,13 @@ void DrawPane(Pane *ToDraw) {
     Bounds.right = ToDraw->X + ToDraw->Width;
     Bounds.bottom = ToDraw->Y + ToDraw->Height;
     RenderTarget->DrawRectangle(Bounds, FillBrush, 2, 0);
+
+    // Padding
+    float Padding = 2;
+    Bounds.left += Padding;
+    Bounds.right -= Padding;
+    Bounds.top += Padding;
+    Bounds.bottom += Padding;
 
     u64 RenderCursor = 0;
     while (RenderCursor < Buffer->Length) {
@@ -73,6 +84,9 @@ void DrawPane(Pane *ToDraw) {
             CaretBounds.left = Bounds.left + CaretMetrics.left;
             CaretBounds.top = Bounds.top + CaretMetrics.top;
             CaretBounds.right = CaretBounds.left;
+            if (Editor.Mode != ED_INSERT) {
+                CaretBounds.right += CaretMetrics.width;
+            }
             CaretBounds.bottom = CaretBounds.top + CaretMetrics.height;
             RenderTarget->DrawRectangle(CaretBounds, FillBrush);
         }
@@ -87,11 +101,102 @@ void DrawPane(Pane *ToDraw) {
     }
 }
 
+void OnKeyPress(u32 Codepoint) {
+    u32 ModBits = 0;
+
+    if (IsKeyDown(KEY_CONTROL)) {
+        ModBits |= CTRL;
+    }
+    if (IsKeyDown(KEY_SHIFT)) {
+        ModBits |= SHIFT;
+    }
+    if (IsKeyDown(KEY_MENU)) {
+        ModBits |= ALT;
+    }
+
+    if (!(ModBits & CTRL) || Codepoint > KEY_Z) {
+        if (KEY_SPACE <= Codepoint && Codepoint <= KEY_Z) {
+            return;
+        }
+    }
+
+    switch (Codepoint) {
+        case KEY_CONTROL:
+        case KEY_MENU:
+        case KEY_SHIFT:
+            return;
+        default:
+            break;
+    }
+
+    u32 KeyCombination = Codepoint | ModBits;
+
+    Editor.InputEvent.Char = char(Codepoint & 0xFF);
+    Editor.InputEvent.KeyCombination = KeyCombination;
+
+    EKeymap *Keymap = Editor.Keymaps + Editor.Mode;
+    EShortcut *Shortcut = KeymapGetShortcut(Keymap, KeyCombination);
+    Shortcut->Function(&Editor);
+}
+
+void OnCharInput(char Char) {
+    u32 ModBits = 0;
+
+    if (IsKeyDown(KEY_CONTROL)) {
+        ModBits |= CTRL;
+    }
+    if (IsKeyDown(KEY_SHIFT)) {
+        ModBits |= SHIFT;
+    }
+    if (IsKeyDown(KEY_MENU)) {
+        ModBits |= ALT;
+    }
+
+    if (Char < 32 || Char > 127) {
+        return;
+    }
+
+    u32 KeyCombination = Char;
+    if ('a' <= KeyCombination && KeyCombination <= 'z') {
+        KeyCombination -= 32;
+    }
+
+    KeyCombination |= ModBits;
+
+    Editor.InputEvent.Char = Char;
+    Editor.InputEvent.KeyCombination = KeyCombination;
+
+    EKeymap *Keymap = Editor.Keymaps + Editor.Mode;
+    EShortcut *Shortcut = KeymapGetShortcut(Keymap, KeyCombination);
+    Shortcut->Function(&Editor);
+}
+
+void AdjustTabWidth() {
+    IDWriteTextLayout *TextLayout;
+    CheckFail(DWriteFactory->CreateTextLayout(
+        L" ",
+        1,
+        TextFormat,
+        128.0f,
+        128.0f,
+        &TextLayout
+    ));
+
+    DWRITE_TEXT_METRICS CharMetrics;
+    TextLayout->GetMetrics(&CharMetrics);
+
+    TextFormat->SetIncrementalTabStop(TAB_SIZE * CharMetrics.widthIncludingTrailingWhitespace);
+
+    TextLayout->Release();
+}
+
 void NKMain() {
     Window MainWindow = {};
     MainWindow.Title = "Editor";
     MainWindow.Size.X = 1280;
     MainWindow.Size.Y = 720;
+    MainWindow.KeyCallback = OnKeyPress;
+    MainWindow.CharCallback = OnCharInput;
 
     if (!InitWindow(&MainWindow)) {
         Print("Failed to initialize window!\n");
@@ -119,16 +224,23 @@ void NKMain() {
         &TextFormat
     ));
 
+    AdjustTabWidth();
+
     RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &FillBrush);
 
-    Pane InitialPane = CreatePane(KiloBytes(16), 256, 60, 20, 20, 600, 400);
-    u64 Cursor = 0;
-    Cursor = InsertString(&InitialPane.Buffer, "Lmao, no way this actually works!", 0);
-    Cursor = InsertLine(&InitialPane.Buffer, Cursor, 0);
-    Cursor = InsertString(&InitialPane.Buffer, "There is actually no way", Cursor);
-    InitialPane.Cursor = 6;
+    Editor.Mode = ED_INSERT;
 
+    Pane InitialPane = CreatePane(KiloBytes(16), 256, 60, 0, 0, MainWindow.Size.X, MainWindow.Size.Y);
+
+    Editor.Panes[0] = InitialPane;
+    Editor.ActivePane = &Editor.Panes[0];
+
+    CreateDefaultKeymaps(&Editor);
+
+    double CPUTimeAverage = 0.0;
     while (MainWindow.Running) {
+        u64 CPUTimeBegin = GetTimeNowUs();
+
         UpdateWindow(&MainWindow);
 
         if (MainWindow.Resized) {
@@ -142,8 +254,18 @@ void NKMain() {
         RenderTarget->BeginDraw();
         RenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
 
-        DrawPane(&InitialPane);
+        DrawPane(Editor.ActivePane);
+
         RenderTarget->EndDraw();
+
+        u64 CPUTimeEnd = GetTimeNowUs();
+        double CPUTimeDeltaMS = double(CPUTimeEnd - CPUTimeBegin) / 1000.0;
+        
+        CPUTimeAverage = CPUTimeAverage * 0.95 + CPUTimeDeltaMS * 0.05;
+
+        char PerfTitle[128];
+        stbsp_snprintf(PerfTitle, sizeof(PerfTitle), "cpu: %.2fmss", CPUTimeAverage);
+        SetWindowTitle(&MainWindow, PerfTitle);
     }
 
     DestroyPane(InitialPane);

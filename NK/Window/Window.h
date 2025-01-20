@@ -13,6 +13,9 @@ struct Int2 {
     int Y;
 };
 
+typedef void (*KeyPressCallbackFunction)(u32 Codepoint);
+typedef void (*CharCallbackFunction)(char Char);
+
 struct Window {
     const char *Title;
     Int2 Position;
@@ -21,6 +24,9 @@ struct Window {
 
     b8 Running;
     b8 Fullscreen;
+
+    KeyPressCallbackFunction KeyCallback;
+    CharCallbackFunction CharCallback;
 
 #if OS_WINDOWS
     HWND Handle;
