@@ -390,7 +390,7 @@ u64 CursorColumn(GapBuffer *Buffer, u64 Cursor) {
     return Cursor - CursorLineBegin(Buffer, Cursor);
 }
 
-internal u64 CursorSkipWhitespace(u64 Cursor, GapBuffer *Buffer) {
+u64 CursorSkipWhitespace(u64 Cursor, GapBuffer *Buffer) {
     u8 Char = (*Buffer)[Cursor];
 
     Cursor = CursorNext(Buffer, Cursor);

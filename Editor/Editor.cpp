@@ -139,16 +139,16 @@ void OnKeyPress(u32 Codepoint) {
     u32 ModBits = 0;
 
     if (IsKeyDown(KEY_CONTROL)) {
-        ModBits |= CTRL;
+        ModBits |= KEYMAP_CTRL;
     }
     if (IsKeyDown(KEY_SHIFT)) {
-        ModBits |= SHIFT;
+        ModBits |= KEYMAP_SHIFT;
     }
     if (IsKeyDown(KEY_MENU)) {
-        ModBits |= ALT;
+        ModBits |= KEYMAP_ALT;
     }
 
-    if (!(ModBits & CTRL) || Codepoint > KEY_Z) {
+    if (!(ModBits & KEYMAP_CTRL) || Codepoint > KEY_Z) {
         if (KEY_SPACE <= Codepoint && Codepoint <= KEY_Z) {
             return;
         }
@@ -163,46 +163,27 @@ void OnKeyPress(u32 Codepoint) {
             break;
     }
 
-    u32 KeyCombination = Codepoint | ModBits;
-
-    Editor.InputEvent.Char = char(Codepoint & 0xFF);
-    Editor.InputEvent.KeyCombination = KeyCombination;
-
-    EKeymap *Keymap = Editor.Keymaps + Editor.Mode;
-    EShortcut *Shortcut = KeymapGetShortcut(Keymap, KeyCombination);
-    Shortcut->Function(&Editor);
+    HandleShortcut(&Editor, char(Codepoint & 0xFF), ModBits);
 }
 
 void OnCharInput(char Char) {
     u32 ModBits = 0;
 
     if (IsKeyDown(KEY_CONTROL)) {
-        ModBits |= CTRL;
+        ModBits |= KEYMAP_CTRL;
     }
     if (IsKeyDown(KEY_SHIFT)) {
-        ModBits |= SHIFT;
+        ModBits |= KEYMAP_SHIFT;
     }
     if (IsKeyDown(KEY_MENU)) {
-        ModBits |= ALT;
+        ModBits |= KEYMAP_ALT;
     }
 
     if (Char < 32 || Char > 127) {
         return;
     }
 
-    u32 KeyCombination = Char;
-    if ('a' <= KeyCombination && KeyCombination <= 'z') {
-        KeyCombination -= 32;
-    }
-
-    KeyCombination |= ModBits;
-
-    Editor.InputEvent.Char = Char;
-    Editor.InputEvent.KeyCombination = KeyCombination;
-
-    EKeymap *Keymap = Editor.Keymaps + Editor.Mode;
-    EShortcut *Shortcut = KeymapGetShortcut(Keymap, KeyCombination);
-    Shortcut->Function(&Editor);
+    HandleShortcut(&Editor, Char, ModBits);
 }
 
 void AdjustTabWidthAndSetLineHeight() {
@@ -274,14 +255,15 @@ void NKMain() {
 
     Editor.Mode = ED_NORMAL;
 
+    Arena KeymapArena = CreateArena(Megabytes(1));
+    CreateKeymaps(&KeymapArena);
+
     Pane InitialPane = CreatePane(KiloBytes(16), 0, 0, MainWindow.Size.X, MainWindow.Size.Y);
 
     Editor.Panes[0] = InitialPane;
     Editor.ActivePane = &Editor.Panes[0];
 
     LoadSourceFile(&Editor.ActivePane->Buffer, "Editor/Editor.cpp");
-
-    CreateDefaultKeymaps(&Editor);
 
     double CPUTimeAverage = 0.0;
     while (MainWindow.Running) {
@@ -322,6 +304,7 @@ void NKMain() {
         SetWindowTitle(&MainWindow, PerfTitle);
     }
 
+    FreeArena(&KeymapArena);
     DestroyPane(InitialPane);
 
     TextFormat->Release();

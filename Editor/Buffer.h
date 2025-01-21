@@ -87,6 +87,8 @@ u64 CursorNextLineEnd(GapBuffer *Buffer, u64 Cursor);
 u64 CursorPrevLineEnd(GapBuffer *Buffer, u64 Cursor);
 u64 CursorColumn(GapBuffer *Buffer, u64 Cursor);
 
+u64 CursorSkipWhitespace(u64 Cursor, GapBuffer *Buffer);
+
 u64 CursorPrevWord(GapBuffer *Buffer, u64 Cursor);
 u64 CursorEndOfWord(GapBuffer *Buffer, u64 Cursor);
 u64 CursorNextWord(GapBuffer *Buffer, u64 Cursor);
