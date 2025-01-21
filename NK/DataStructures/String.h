@@ -102,6 +102,10 @@ typedef MakeNativeString(Literal) ((char *) Literal)
 #endif
 
 inline b32 IsDigit(char Char) {
+    return ('0' <= Char && Char <= '9');
+}
+
+inline b32 IsAlpha(char Char) {
     return ('A' <= Char && Char <= 'Z')
         || ('a' <= Char && Char <= 'z');
 }

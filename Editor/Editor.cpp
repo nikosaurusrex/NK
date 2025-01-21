@@ -12,11 +12,11 @@
 #include <dwrite.h>
 #include <d2d1.h>
 
-#define CheckFail(Call) do {         \
-    HRESULT HResult = Call;           \
-    if (FAILED(HResult)) {            \
+#define CheckFail(Call) do { \
+    HRESULT HResult = Call; \
+    if (FAILED(HResult)) { \
          Print("DWrite Call Failed: 0x%x\n", HResult); NK_TRAP(); Exit(1); \
-    }                                 \
+    } \
 } while (0);
 
 enum {
@@ -30,6 +30,37 @@ global IDWriteTextFormat *TextFormat;
 global ID2D1SolidColorBrush *FillBrush;
 
 global TextEditor Editor;
+global float LineHeight;
+global float Padding = 2;
+
+void UpdateScroll(Pane *Target) {
+    GapBuffer *Buffer = &Target->Buffer;
+
+    u64 CursorLine = 0;
+
+    for (u64 i = 0; i < Target->Cursor; ++i) {
+        if ((*Buffer)[i] == '\n') {
+            CursorLine++;
+        }
+    }
+
+    float ContentHeight = Target->Height - Padding * 2;
+    u64 LinesVisible = IFloor(ContentHeight / LineHeight);
+
+    if (CursorLine < Target->Scroll) {
+        Target->Scroll = CursorLine;
+    } else if (CursorLine >= Target->Scroll + LinesVisible) {
+        Target->Scroll = CursorLine - LinesVisible + 1;
+    }
+
+    u64 RenderIndex = 0;
+    u64 CurrentLine = 0;
+    while (CurrentLine < Target->Scroll && RenderIndex < Buffer->Length) {
+        RenderIndex = CursorNextLineBegin(Buffer, RenderIndex);
+        CurrentLine++;
+    }
+    Target->ScrollRenderIndex = RenderIndex;
+}
 
 void DrawPane(Pane *ToDraw) {
     GapBuffer *Buffer = &ToDraw->Buffer;
@@ -45,14 +76,17 @@ void DrawPane(Pane *ToDraw) {
     RenderTarget->DrawRectangle(Bounds, FillBrush, 2, 0);
 
     // Padding
-    float Padding = 2;
     Bounds.left += Padding;
     Bounds.right -= Padding;
     Bounds.top += Padding;
     Bounds.bottom += Padding;
 
-    u64 RenderCursor = 0;
-    while (RenderCursor < Buffer->Length) {
+    if (ToDraw == Editor.ActivePane) {
+        UpdateScroll(ToDraw);
+    }
+
+    u64 RenderCursor = ToDraw->ScrollRenderIndex;
+    while (RenderCursor < Buffer->Length && Bounds.top < Bounds.bottom) {
         int Line8Length = GetLineFromGapBuffer(Buffer, RenderCursor, Line8, sizeof(Line8));
         int Line16Length = MultiByteToWideChar(CP_UTF8, 0, Line8, Line8Length, Line16, sizeof(Line16) / sizeof(wchar_t));
 
@@ -95,7 +129,7 @@ void DrawPane(Pane *ToDraw) {
         u32 LineCount = 0;
         TextLayout->GetLineMetrics(&LineMetrics, 1, &LineCount);
 
-        Bounds.top += LineMetrics.height;
+        Bounds.top += LineMetrics.height * LineCount;
 
         TextLayout->Release();
     }
@@ -171,7 +205,7 @@ void OnCharInput(char Char) {
     Shortcut->Function(&Editor);
 }
 
-void AdjustTabWidth() {
+void AdjustTabWidthAndSetLineHeight() {
     IDWriteTextLayout *TextLayout;
     CheckFail(DWriteFactory->CreateTextLayout(
         L" ",
@@ -186,6 +220,12 @@ void AdjustTabWidth() {
     TextLayout->GetMetrics(&CharMetrics);
 
     TextFormat->SetIncrementalTabStop(TAB_SIZE * CharMetrics.widthIncludingTrailingWhitespace);
+
+    DWRITE_LINE_METRICS LineMetrics;
+    u32 LineCount = 0;
+    TextLayout->GetLineMetrics(&LineMetrics, 1, &LineCount);
+
+    LineHeight = LineMetrics.height;
 
     TextLayout->Release();
 }
@@ -211,12 +251,16 @@ void NKMain() {
     D2D1_SIZE_U WinSize = {};
     WinSize.width = MainWindow.Size.X;
     WinSize.height = MainWindow.Size.Y;
-    CheckFail(D2DFactory->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), D2D1::HwndRenderTargetProperties(MainWindow.Handle, WinSize), &RenderTarget));
+    CheckFail(D2DFactory->CreateHwndRenderTarget(
+        D2D1::RenderTargetProperties(),
+        D2D1::HwndRenderTargetProperties(MainWindow.Handle, WinSize, D2D1_PRESENT_OPTIONS_NONE),
+        &RenderTarget)
+    );
 
     CheckFail(DWriteFactory->CreateTextFormat(
         L"Roboto",
         0,
-        DWRITE_FONT_WEIGHT_REGULAR,
+        DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL,
         16.0f,
@@ -224,16 +268,18 @@ void NKMain() {
         &TextFormat
     ));
 
-    AdjustTabWidth();
+    AdjustTabWidthAndSetLineHeight();
 
     RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &FillBrush);
 
-    Editor.Mode = ED_INSERT;
+    Editor.Mode = ED_NORMAL;
 
-    Pane InitialPane = CreatePane(KiloBytes(16), 256, 60, 0, 0, MainWindow.Size.X, MainWindow.Size.Y);
+    Pane InitialPane = CreatePane(KiloBytes(16), 0, 0, MainWindow.Size.X, MainWindow.Size.Y);
 
     Editor.Panes[0] = InitialPane;
     Editor.ActivePane = &Editor.Panes[0];
+
+    LoadSourceFile(&Editor.ActivePane->Buffer, "Editor/Editor.cpp");
 
     CreateDefaultKeymaps(&Editor);
 
@@ -248,7 +294,15 @@ void NKMain() {
             D2D1_SIZE_U WinSize = {};
             WinSize.width = MainWindow.Size.X;
             WinSize.height = MainWindow.Size.Y;
-            CheckFail(D2DFactory->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), D2D1::HwndRenderTargetProperties(MainWindow.Handle, WinSize), &RenderTarget));
+
+            CheckFail(D2DFactory->CreateHwndRenderTarget(
+                D2D1::RenderTargetProperties(),
+                D2D1::HwndRenderTargetProperties(MainWindow.Handle, WinSize, D2D1_PRESENT_OPTIONS_NONE),
+                &RenderTarget
+            ));
+
+            Editor.ActivePane->Width = WinSize.width;
+            Editor.ActivePane->Height = WinSize.height;
         }
 
         RenderTarget->BeginDraw();

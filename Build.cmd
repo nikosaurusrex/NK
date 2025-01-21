@@ -1,6 +1,10 @@
 @echo off
 
-set CompilerFlags=-I./ -nologo -arch:AVX2 -fp:fast -fp:except- -GR- -EHa- -Zo -W4 -GS- -Z7 -wd4100 -wd4127 -wd4189 -wd4201
+set RELEASE_BUILD=-O2
+set DEBUG_BUILD=-Z7
+set BUILD_MODE=%DEBUG_BUILD%
+
+set CompilerFlags=-I./ -nologo -arch:AVX2 -fp:fast -fp:except- -GR- -EHa- -Zo -W4 -GS- -wd4100 -wd4127 -wd4189 -wd4201 %BUILD_MODE%
 set LinkerFlags=-incremental:no -opt:ref user32.lib kernel32.lib Advapi32.lib
 
 rem clang-cl %CompilerFlags% NKTests/Tests.cpp /link -OUT:Tests.exe /NODEFAULTLIB /SUBSYSTEM:console %LinkerFlags%

@@ -268,10 +268,8 @@ u64 GetLineLength(GapBuffer *Buffer, u64 Cursor) {
     return CursorLineEnd(Buffer, Cursor) - CursorLineBegin(Buffer, Cursor);
 }
 
-Pane CreatePane(u64 Capacity, u32 Columns, u32 Rows, float X, float Y, float Width, float Height) {
+Pane CreatePane(u64 Capacity, float X, float Y, float Width, float Height) {
     Pane Result = {};
-    Result.Rows = Rows;
-    Result.Columns = Columns;
     Result.X = X;
     Result.Y = Y;
     Result.Width = Width;
@@ -300,38 +298,12 @@ void PaneSetCursor(Pane *P, u64 Cursor) {
     P->Cursor = Cursor;
     PaneResetColStore(P);
 
-    UpdateScroll(P);
+    // We do this every frame now
+    // UpdateScroll(P);
 }
 
 void PaneResetColStore(Pane *P) {
     P->CursorStore = -1;
-}
-
-void UpdateScroll(Pane *P) {
-    u32 CursorLine = 0;
-
-    for (u64 i = 0; i < P->Cursor; ++i) {
-        if (P->Buffer[i] == '\n') {
-            CursorLine++;
-        }
-    }
-
-    if (CursorLine < P->ScrollOffset) {
-        P->ScrollOffset = CursorLine;
-    } else if (CursorLine >= P->ScrollOffset + P->Rows) {
-        P->ScrollOffset = CursorLine - P->Rows + 1;
-    }
-
-    u32 TotalLines = 1;
-    for (u64 i = 0; i < P->Buffer.Length; ++i) {
-        if (P->Buffer[i] == '\n') {
-            TotalLines++;
-        }
-    }
-
-    u32 MaxScroll = (TotalLines > P->Rows) ? (TotalLines - P->Rows) : 0;
-
-    P->ScrollOffset = Min(P->ScrollOffset, MaxScroll);
 }
 
 u64 CursorBack(GapBuffer *Buffer, u64 Cursor) {

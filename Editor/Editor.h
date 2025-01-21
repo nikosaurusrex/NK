@@ -14,7 +14,6 @@ struct EInputEvent {
     u8 Char;
 };
 
-
 struct EKeymap {
     EShortcut Shortcuts[MAX_KEY_COMBINATIONS];
 };
