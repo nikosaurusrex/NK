@@ -16,8 +16,17 @@ struct Keymap {
     ShortcutFunction Function;
 };
 
+struct CopyBuffer {
+    u8 *Pointer;
+    u64 Length;
+    u64 Capacity;
+};
+
 global Keymap *NormalModeMap;
+global Keymap *VisualModeMap;
 global ShortcutNode *ParseNode;
+
+global CopyBuffer YoinkBuffer;
 
 enum {
     KEYMAP_CTRL = 0x1,
@@ -151,8 +160,12 @@ void MoveCursorDown(TextEditor *Ed) {
 }
 
 void ChangeToNormalMode(TextEditor *Ed) {
+    Pane *P = Ed->ActivePane;
+
     Ed->Mode = ED_NORMAL;
     ParseNode = 0;
+
+    PaneCursorBack(P);
 }
 
 void ClearNormalMode(TextEditor *Ed) {
@@ -239,6 +252,108 @@ void SkipParagraphDown(TextEditor *Ed) {
     PaneSetCursor(P, CursorParagraphDown(Buffer, P->Cursor));
 }
 
+void ChangeToVisualMode(TextEditor *Ed) {
+    Pane *P = Ed->ActivePane;
+
+    Ed->Mode = ED_VISUAL;
+    P->VisualCursor = P->Cursor;
+    ParseNode = 0;
+}
+
+void PasteYoinkBufferNextChar(TextEditor *Ed) {
+    Pane *P = Ed->ActivePane;
+    GapBuffer *Buffer = &P->Buffer;
+
+    PaneCursorNext(P);
+
+    if (YoinkBuffer.Length > 0) {
+        P->Cursor = InsertString(Buffer, String(YoinkBuffer.Pointer, YoinkBuffer.Length), P->Cursor);
+    }
+}
+
+void PasteYoinkBuffer(TextEditor *Ed) {
+    Pane *P = Ed->ActivePane;
+    GapBuffer *Buffer = &P->Buffer;
+
+    if (YoinkBuffer.Length > 0) {
+        P->Cursor = InsertString(Buffer, String(YoinkBuffer.Pointer, YoinkBuffer.Length), P->Cursor);
+    }
+}
+
+void CopySelection(Pane *P, GapBuffer *Buffer) {
+    u64 VisualStart, VisualEnd;
+    if (P->Cursor > P->VisualCursor) {
+        VisualStart = P->VisualCursor;
+        VisualEnd = P->Cursor;
+    } else {
+        VisualStart = P->Cursor;
+        VisualEnd = P->VisualCursor;
+    }
+
+    u64 VisualLength = VisualEnd - VisualStart + 1;
+    YoinkBuffer.Length = VisualLength;
+
+    if (YoinkBuffer.Capacity < VisualLength) {
+        YoinkBuffer.Capacity = VisualLength;
+        HeapFree(YoinkBuffer.Pointer);
+        YoinkBuffer.Pointer = (u8 *) HeapAlloc(YoinkBuffer.Capacity);
+    }
+
+    for (u64 i = 0; i < VisualLength; ++i) {
+        YoinkBuffer.Pointer[i] = (*Buffer)[VisualStart + i];
+    }
+}
+
+void DeleteSelection(Pane *P, GapBuffer *Buffer) {
+    u64 VisualStart, VisualEnd;
+    if (P->Cursor > P->VisualCursor) {
+        VisualStart = P->VisualCursor;
+        VisualEnd = P->Cursor;
+    } else {
+        VisualStart = P->Cursor;
+        VisualEnd = P->VisualCursor;
+    }
+
+    u64 VisualLength = VisualEnd - VisualStart + 1;
+    
+    DeleteChars(Buffer, VisualStart, VisualLength);
+}
+
+void YoinkInVisualMode(TextEditor *Ed) {
+    Pane *P = Ed->ActivePane;
+    GapBuffer *Buffer = &P->Buffer;
+
+    CopySelection(P, Buffer);
+
+    Ed->Mode = ED_NORMAL;
+    P->Cursor = P->VisualCursor;
+    ParseNode = 0;
+}
+
+void DeleteInVisualMode(TextEditor *Ed) {
+    Pane *P = Ed->ActivePane;
+    GapBuffer *Buffer = &P->Buffer;
+
+    CopySelection(P, Buffer);
+    DeleteSelection(P, Buffer);
+
+    Ed->Mode = ED_NORMAL;
+    P->Cursor = P->VisualCursor;
+    ParseNode = 0;
+}
+
+void ChangeInVisualMode(TextEditor *Ed) {
+    Pane *P = Ed->ActivePane;
+    GapBuffer *Buffer = &P->Buffer;
+
+    CopySelection(P, Buffer);
+    DeleteSelection(P, Buffer);
+
+    Ed->Mode = ED_INSERT;
+    P->Cursor = P->VisualCursor;
+    ParseNode = 0;
+}
+
 void InsertShortcut(Arena *A, Keymap *Kmap, const char *Shortcut, ShortcutFunction Function) {
     const char *Pointer = Shortcut;
 
@@ -275,31 +390,48 @@ void InsertShortcut(Arena *A, Keymap *Kmap, const char *Shortcut, ShortcutFuncti
 
 void CreateKeymaps(Arena *A) {
     NormalModeMap = PushStruct(A, Keymap);
-
     InsertShortcut(A, NormalModeMap, "h", MoveCursorBackLineStop);
     InsertShortcut(A, NormalModeMap, "l", MoveCursorNextLineStop);
     InsertShortcut(A, NormalModeMap, "j", MoveCursorDown);
     InsertShortcut(A, NormalModeMap, "k", MoveCursorUp);
-
     InsertShortcut(A, NormalModeMap, "x", DeleteCharForwards);
-
     InsertShortcut(A, NormalModeMap, "w", GotoNextWord);
     InsertShortcut(A, NormalModeMap, "e", GotoEndOfWord);
     InsertShortcut(A, NormalModeMap, "b", GotoPrevWord);
-
     InsertShortcut(A, NormalModeMap, "i", ChangeToInsertMode);
     InsertShortcut(A, NormalModeMap, "I", ChangeToInsertModeBeginningOfLine);
     InsertShortcut(A, NormalModeMap, "a", ChangeToInsertModeNextChar);
     InsertShortcut(A, NormalModeMap, "A", ChangeToInsertModeEndOfLine);
-
     InsertShortcut(A, NormalModeMap, "gg", GotoBufferBegin);
     InsertShortcut(A, NormalModeMap, "G", GotoBufferEnd);
-
     InsertShortcut(A, NormalModeMap, "o", InsertNewLineAfter);
     InsertShortcut(A, NormalModeMap, "O", InsertNewLineBefore);
-
     InsertShortcut(A, NormalModeMap, "{", SkipParagraphUp);
     InsertShortcut(A, NormalModeMap, "}", SkipParagraphDown);
+    InsertShortcut(A, NormalModeMap, "v", ChangeToVisualMode);
+    InsertShortcut(A, NormalModeMap, "p", PasteYoinkBufferNextChar);
+    InsertShortcut(A, NormalModeMap, "P", PasteYoinkBuffer);
+
+    VisualModeMap = PushStruct(A, Keymap);
+    InsertShortcut(A, VisualModeMap, "h", MoveCursorBackLineStop);
+    InsertShortcut(A, VisualModeMap, "l", MoveCursorNextLineStop);
+    InsertShortcut(A, VisualModeMap, "j", MoveCursorDown);
+    InsertShortcut(A, VisualModeMap, "k", MoveCursorUp);
+    InsertShortcut(A, VisualModeMap, "w", GotoNextWord);
+    InsertShortcut(A, VisualModeMap, "e", GotoEndOfWord);
+    InsertShortcut(A, VisualModeMap, "b", GotoPrevWord);
+    InsertShortcut(A, VisualModeMap, "gg", GotoBufferBegin);
+    InsertShortcut(A, VisualModeMap, "G", GotoBufferEnd);
+    InsertShortcut(A, VisualModeMap, "{", SkipParagraphUp);
+    InsertShortcut(A, VisualModeMap, "}", SkipParagraphDown);
+    InsertShortcut(A, VisualModeMap, "y", YoinkInVisualMode);
+    InsertShortcut(A, VisualModeMap, "d", DeleteInVisualMode);
+    InsertShortcut(A, VisualModeMap, "c", ChangeInVisualMode);
+
+    // Allocate CopyBuffer
+    YoinkBuffer.Capacity = KiloBytes(2);
+    YoinkBuffer.Pointer = (u8 *) HeapAlloc(YoinkBuffer.Capacity);
+    YoinkBuffer.Length = 0;
 }
 
 void HandleInsertMode(TextEditor *Ed, u8 Key, u32 ModBits) {
@@ -319,9 +451,9 @@ void HandleInsertMode(TextEditor *Ed, u8 Key, u32 ModBits) {
     }
 }
 
-void HandleNormalMode(TextEditor *Ed, u8 Key, u32 ModBits) {
+void DispatchShortcut(TextEditor *Ed, Keymap *Kmap, u8 Key, u32 ModBits) {
     if (!ParseNode) {
-        ParseNode = NormalModeMap->Children[Key];
+        ParseNode = Kmap->Children[Key];
     } else {
         for (int i = 0; i < SHORTCUT_NODE_BUCKET; ++i) {
             if (ParseNode->Keys[i] == Key) {
@@ -343,8 +475,16 @@ void HandleShortcut(TextEditor *Ed, u8 Key, u32 ModBits) {
     } break;
     case ED_NORMAL: {
         if (Key != KEY_ESCAPE) {
-            HandleNormalMode(Ed, Key, ModBits);
+            DispatchShortcut(Ed, NormalModeMap, Key, ModBits);
         } else {
+            ParseNode = 0;
+        }
+    } break;
+    case ED_VISUAL: {
+        if (Key != KEY_ESCAPE) {
+            DispatchShortcut(Ed, VisualModeMap, Key, ModBits);
+        } else {
+            ChangeToNormalMode(Ed);
             ParseNode = 0;
         }
     } break;

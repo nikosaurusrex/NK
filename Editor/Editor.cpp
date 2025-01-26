@@ -27,7 +27,10 @@ global IDWriteFactory *DWriteFactory;
 global ID2D1Factory *D2DFactory;
 global ID2D1HwndRenderTarget *RenderTarget;
 global IDWriteTextFormat *TextFormat;
-global ID2D1SolidColorBrush *FillBrush;
+
+global ID2D1SolidColorBrush *TextBrush;
+global ID2D1SolidColorBrush *TextBrushInverted;
+global ID2D1SolidColorBrush *SelectionBrush;
 
 global TextEditor Editor;
 global float LineHeight;
@@ -73,7 +76,7 @@ void DrawPane(Pane *ToDraw) {
     Bounds.top = ToDraw->Y;
     Bounds.right = ToDraw->X + ToDraw->Width;
     Bounds.bottom = ToDraw->Y + ToDraw->Height;
-    RenderTarget->DrawRectangle(Bounds, FillBrush, 2, 0);
+    RenderTarget->DrawRectangle(Bounds, TextBrush, 2, 0);
 
     // Padding
     Bounds.left += Padding;
@@ -91,7 +94,7 @@ void DrawPane(Pane *ToDraw) {
         int Line16Length = MultiByteToWideChar(CP_UTF8, 0, Line8, Line8Length, Line16, sizeof(Line16) / sizeof(wchar_t));
 
         u64 PreviousRenderCursor = RenderCursor;
-        RenderCursor += Line8Length + 1;
+        RenderCursor += Line8Length;
 
         IDWriteTextLayout *TextLayout;
         CheckFail(DWriteFactory->CreateTextLayout(
@@ -103,33 +106,79 @@ void DrawPane(Pane *ToDraw) {
             &TextLayout
         ));
 
-        D2D1_POINT_2F Location;
-        Location.x = Bounds.left;
-        Location.y = Bounds.top;
-        RenderTarget->DrawTextLayout(Location, TextLayout, FillBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        // Draw selection
+        if (Editor.Mode == ED_VISUAL) {
+            u32 VisualStart;
+            u32 VisualEnd;
+            if (ToDraw->Cursor > ToDraw->VisualCursor) {
+                VisualStart = ToDraw->VisualCursor;
+                VisualEnd = ToDraw->Cursor;
+            } else {
+                VisualStart = ToDraw->Cursor;
+                VisualEnd = ToDraw->VisualCursor;
+            }
 
+            u32 SelectionStart = Max(PreviousRenderCursor, VisualStart);
+            u32 SelectionEnd = Min(RenderCursor, VisualEnd);
+
+            if (SelectionStart < SelectionEnd) {
+                u32 SelectionStartOffset = SelectionStart - PreviousRenderCursor;
+                u32 SelectionEndOffset = SelectionEnd - PreviousRenderCursor;
+
+                DWRITE_HIT_TEST_METRICS SelectionStartMetrics, SelectionEndMetrics;
+                float SelectionStartX, SelectionEndX;
+                float SelectionY;
+                TextLayout->HitTestTextPosition(SelectionStartOffset, 0, &SelectionStartX, &SelectionY, &SelectionStartMetrics);
+                TextLayout->HitTestTextPosition(SelectionEndOffset, 0, &SelectionEndX, &SelectionY, &SelectionEndMetrics);
+
+                D2D1_RECT_F SelectionRect;
+                SelectionRect.left = Bounds.left + SelectionStartMetrics.left;
+                SelectionRect.top = Bounds.top + SelectionStartMetrics.top;
+                SelectionRect.right = Bounds.left + SelectionEndMetrics.left;
+                SelectionRect.bottom = SelectionRect.top + SelectionStartMetrics.height;
+
+                RenderTarget->FillRectangle(&SelectionRect, SelectionBrush);
+            }
+        }
+
+        // Draw Cursor
         if (PreviousRenderCursor <= ToDraw->Cursor && ToDraw->Cursor <= RenderCursor) {
+            u32 CursorStart = ToDraw->Cursor - PreviousRenderCursor;
+            
             DWRITE_HIT_TEST_METRICS CaretMetrics;
             float CaretX;
             float CaretY;
-            TextLayout->HitTestTextPosition(ToDraw->Cursor - PreviousRenderCursor, 0, &CaretX, &CaretY, &CaretMetrics);
+            TextLayout->HitTestTextPosition(CursorStart, 0, &CaretX, &CaretY, &CaretMetrics);
 
             D2D1_RECT_F CaretBounds;
             CaretBounds.left = Bounds.left + CaretMetrics.left;
             CaretBounds.top = Bounds.top + CaretMetrics.top;
             CaretBounds.right = CaretBounds.left;
+            CaretBounds.bottom = CaretBounds.top + CaretMetrics.height;
+
             if (Editor.Mode != ED_INSERT) {
                 CaretBounds.right += CaretMetrics.width;
+                RenderTarget->FillRectangle(CaretBounds, TextBrush);
+
+                DWRITE_TEXT_RANGE TextRange = {CursorStart, 1};
+                TextLayout->SetDrawingEffect(TextBrushInverted, TextRange);
+            } else{
+                RenderTarget->DrawRectangle(CaretBounds, TextBrush);
             }
-            CaretBounds.bottom = CaretBounds.top + CaretMetrics.height;
-            RenderTarget->DrawRectangle(CaretBounds, FillBrush);
         }
+
+        D2D1_POINT_2F Location;
+        Location.x = Bounds.left;
+        Location.y = Bounds.top;
+        RenderTarget->DrawTextLayout(Location, TextLayout, TextBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
 
         DWRITE_LINE_METRICS LineMetrics;
         u32 LineCount = 0;
         TextLayout->GetLineMetrics(&LineMetrics, 1, &LineCount);
 
         Bounds.top += LineMetrics.height * LineCount;
+
+        RenderCursor++; // skip \n - has to be down after rendering cursor
 
         TextLayout->Release();
     }
@@ -223,6 +272,7 @@ void NKMain() {
         Print("Failed to initialize window!\n");
         Exit(1);
     }
+    MaximizeWindow(&MainWindow);
 
     CheckFail(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown **) &DWriteFactory));
 
@@ -251,11 +301,13 @@ void NKMain() {
 
     AdjustTabWidthAndSetLineHeight();
 
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &FillBrush);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &TextBrush);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &TextBrushInverted);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::LightGray), &SelectionBrush);
 
     Editor.Mode = ED_NORMAL;
 
-    Arena KeymapArena = CreateArena(Megabytes(1));
+    Arena KeymapArena = CreateArena(MegaBytes(1));
     CreateKeymaps(&KeymapArena);
 
     Pane InitialPane = CreatePane(KiloBytes(16), 0, 0, MainWindow.Size.X, MainWindow.Size.Y);
@@ -272,16 +324,11 @@ void NKMain() {
         UpdateWindow(&MainWindow);
 
         if (MainWindow.Resized) {
-            RenderTarget->Release();
             D2D1_SIZE_U WinSize = {};
             WinSize.width = MainWindow.Size.X;
             WinSize.height = MainWindow.Size.Y;
 
-            CheckFail(D2DFactory->CreateHwndRenderTarget(
-                D2D1::RenderTargetProperties(),
-                D2D1::HwndRenderTargetProperties(MainWindow.Handle, WinSize, D2D1_PRESENT_OPTIONS_NONE),
-                &RenderTarget
-            ));
+            RenderTarget->Resize(WinSize);
 
             Editor.ActivePane->Width = WinSize.width;
             Editor.ActivePane->Height = WinSize.height;
@@ -308,7 +355,9 @@ void NKMain() {
     DestroyPane(InitialPane);
 
     TextFormat->Release();
-    FillBrush->Release();
+    TextBrush->Release();
+    TextBrushInverted->Release();
+    SelectionBrush->Release();
     RenderTarget->Release();
     DWriteFactory->Release();
     D2DFactory->Release();

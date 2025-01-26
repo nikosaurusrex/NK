@@ -270,6 +270,22 @@ void ToggleFullscreen(Window *Win) {
     }
 }
 
+void MaximizeWindow(Window *Win) {
+    ShowWindow(Win->Handle, SW_MAXIMIZE);
+
+    RECT ClientRect;
+    GetClientRect(Win->Handle, &ClientRect);
+
+    Win->Size.X = ClientRect.right - ClientRect.left;
+    Win->Size.Y = ClientRect.bottom - ClientRect.top;
+
+    POINT WindowPos = {ClientRect.left, ClientRect.top};
+    ClientToScreen(Win->Handle, &WindowPos);
+
+    Win->Position.X = WindowPos.x;
+    Win->Position.Y = WindowPos.y;
+}
+
 void SetWindowTitle(Window *Win, const char *Title) {
     SetWindowTextA(Win->Handle, Title);
 }

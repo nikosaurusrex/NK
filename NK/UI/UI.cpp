@@ -257,7 +257,7 @@ void InitDirectWrite() {
 }
 
 void InitUI(Window *Win) {
-    UI.RenderGroupArena = CreateArena(Megabytes(16));
+    UI.RenderGroupArena = CreateArena(MegaBytes(16));
 
     UI.Shader = LoadShader(MakeNativeString("NK/UI/Shader.hlsl"), MakeNativeString("NK/UI/Shader.hlsl"));
 

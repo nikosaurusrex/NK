@@ -32,7 +32,7 @@ struct Pane {
     GapBuffer Buffer;
 
     u64 Cursor;
-    u64 Visual; // visual cursor position
+    u64 VisualCursor; // visual cursor position
     s64 CursorStore; // cursor column position to restore after moving up/down
 
     float X;

@@ -42,7 +42,7 @@ typedef unsigned int uint;
 #endif
 
 #define KiloBytes(n) (((u64) (n)) << 10)
-#define Megabytes(n) (((u64) (n)) << 20)
+#define MegaBytes(n) (((u64) (n)) << 20)
 #define GigaBytes(n) (((u64) (n)) << 30)
 #define TeraBytes(n) (((u64) (n)) << 40)
 
