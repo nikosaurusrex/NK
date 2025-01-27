@@ -10,12 +10,23 @@ enum {
     ED_MODE_COUNT
 };
 
-enum {
-    TAB_SIZE = 4
+struct EditorConfig {
+    int StatusBarPadding;
+    float EditorPadding;
+    float FontSize;
+    int TabSize;
+
+    // Not set by the user
+    float SpaceWidth;
+    float TabWidth;
+    float LineHeight;
+    float StatusBarHeight;
 };
 
 struct TextEditor {
     Pane *ActivePane;
     Pane Panes[1];
+    String Directory;
     u8 Mode;
 };
+

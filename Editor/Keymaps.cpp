@@ -354,6 +354,9 @@ void ChangeInVisualMode(TextEditor *Ed) {
     ParseNode = 0;
 }
 
+void OpenExplorer(TextEditor *Ed) {
+}
+
 void InsertShortcut(Arena *A, Keymap *Kmap, const char *Shortcut, ShortcutFunction Function) {
     const char *Pointer = Shortcut;
 
@@ -411,6 +414,7 @@ void CreateKeymaps(Arena *A) {
     InsertShortcut(A, NormalModeMap, "v", ChangeToVisualMode);
     InsertShortcut(A, NormalModeMap, "p", PasteYoinkBufferNextChar);
     InsertShortcut(A, NormalModeMap, "P", PasteYoinkBuffer);
+    InsertShortcut(A, NormalModeMap, " e", OpenExplorer);
 
     VisualModeMap = PushStruct(A, Keymap);
     InsertShortcut(A, VisualModeMap, "h", MoveCursorBackLineStop);

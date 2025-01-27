@@ -28,27 +28,10 @@ struct GapBuffer {
     }
 };
 
-struct Pane {
-    GapBuffer Buffer;
-
-    u64 Cursor;
-    u64 VisualCursor; // visual cursor position
-    s64 CursorStore; // cursor column position to restore after moving up/down
-
-    float X;
-    float Y;
-    float Width;
-    float Height;
-
-    u64 Scroll;
-    u64 ScrollRenderIndex;
-};
-
 nkinline b32 IsWhitespace(u8 Char);
 
 GapBuffer CreateGapBuffer(u32 Capacity);
 void DestroyGapBuffer(GapBuffer *Buffer);
-void LoadSourceFile(GapBuffer *Buffer, String path);
 
 u64 InsertChar(GapBuffer *Buffer, u8 Char, u64 Position);
 u64 InsertString(GapBuffer *Buffer, String Str, u64 Position);
@@ -61,16 +44,6 @@ String StringFromGapBuffer(GapBuffer *Buffer, Arena *a);
 int GetLineFromGapBuffer(GapBuffer *Buffer, u64 Cursor, char *Output, int OutputSize);
 
 u64 GetLineLength(GapBuffer *Buffer, u64 Cursor);
-
-Pane CreatePane(u64 Capacity, float X, float Y, float Width, float Height);
-void DestroyPane(Pane P);
-
-// they not only move the Cursor but also reset cursor_store
-nkinline void PaneCursorBack(Pane *P);
-nkinline void PaneCursorNext(Pane *P);
-nkinline void _PaneSetCursor(Pane *P, u64 Cursor);
-nkinline void PaneSetCursor(Pane *P, u64 Cursor);
-nkinline void PaneResetColStore(Pane *P);
 
 u64 CursorBack(GapBuffer *Buffer, u64 Cursor);
 u64 CursorNext(GapBuffer *Buffer, u64 Cursor);

@@ -2,6 +2,8 @@ enum {
     MAX_GAP_SIZE = 16,
 };
 
+extern EditorConfig Config;
+
 nkinline int CharType(u8 Char) {
     b8 AlphaNum = (Char >= 'A' && Char <= 'Z')
         || (Char >= 'a' && Char <= 'z')
@@ -77,33 +79,6 @@ void DestroyGapBuffer(GapBuffer *Buffer) {
     ReleaseMemory(Buffer->Pointer, Buffer->Capacity);
 }
 
-void LoadSourceFile(GapBuffer *Buffer, String Path) {
-    String Content = ReadFile(Path);
-    if (!Content.Pointer) {
-        Print("File '%.*s' does not exist\n", (int)Path.Length, Path.Pointer);
-        return;
-    }
-
-    // remove carriage returns
-    u8 *Source = Content.Pointer;
-    u8 *SourceEnd = Content.Pointer + Content.Length;
-    u8 *Dest = Buffer->Pointer;
-    while (Source < SourceEnd) {
-        if (*Source != '\r') {
-            *Dest = *Source;
-            Dest++;
-            Buffer->Start++;
-            Buffer->Length++;
-        }
-        Source++;
-    }
-
-    Buffer->Pointer[Buffer->Length] = 0;
-    Buffer->End = Buffer->Start + MAX_GAP_SIZE;
-
-    HeapFree(Content.Pointer);
-}
-
 u64 InsertChar(GapBuffer *Buffer, u8 Char, u64 Position) {
     Assert(Buffer->Length < Buffer->cap - MAX_GAP_SIZE);
 
@@ -173,16 +148,16 @@ u64 InsertLine(GapBuffer *Buffer, u64 Position, b32 AutoIndent) {
         u8 LastChar = (*Buffer)[LCC];
 
         if (LastChar == '{') {
-            Indent += TAB_SIZE;
+            Indent += Config.TabSize;
         }
 
         Position = InsertChar(Buffer, '\n', Position);
 
-        for (u64 i = 0; i < Indent / TAB_SIZE; ++i) {
+        for (u64 i = 0; i < Indent / Config.TabSize; ++i) {
             Position = InsertChar(Buffer, '\t', Position);
         }
 
-        for (u64 i = 0; i < Indent % TAB_SIZE; ++i) {
+        for (u64 i = 0; i < Indent % Config.TabSize; ++i) {
             Position = InsertChar(Buffer, ' ', Position);
         }
     } else {
@@ -266,44 +241,6 @@ int GetLineFromGapBuffer(GapBuffer *Buffer, u64 Cursor, char *Output, int Output
 
 u64 GetLineLength(GapBuffer *Buffer, u64 Cursor) {
     return CursorLineEnd(Buffer, Cursor) - CursorLineBegin(Buffer, Cursor);
-}
-
-Pane CreatePane(u64 Capacity, float X, float Y, float Width, float Height) {
-    Pane Result = {};
-    Result.X = X;
-    Result.Y = Y;
-    Result.Width = Width;
-    Result.Height = Height;
-
-    Result.Buffer = CreateGapBuffer(Capacity);
-
-    return Result;
-}
-
-void DestroyPane(Pane P) {
-    DestroyGapBuffer(&P.Buffer);
-}
-
-void PaneCursorBack(Pane *P) {
-    P->Cursor = CursorBackNormal(&P->Buffer, P->Cursor);
-    PaneResetColStore(P);
-}
-
-void PaneCursorNext(Pane *P) {
-    P->Cursor = CursorNextNormal(&P->Buffer, P->Cursor);
-    PaneResetColStore(P);
-}
-
-void PaneSetCursor(Pane *P, u64 Cursor) {
-    P->Cursor = Cursor;
-    PaneResetColStore(P);
-
-    // We do this every frame now
-    // UpdateScroll(P);
-}
-
-void PaneResetColStore(Pane *P) {
-    P->CursorStore = -1;
 }
 
 u64 CursorBack(GapBuffer *Buffer, u64 Cursor) {
@@ -560,7 +497,7 @@ u32 LineIndent(GapBuffer *Buffer, u64 Cursor) {
     for (u64 i = Start; i < Cursor; ++i) {
         u8 Char = (*Buffer)[i];
         if (Char == '\t') {
-            Result += TAB_SIZE;
+            Result += Config.TabSize;
         } else if (Char == ' ') {
             Result++;
         } else {

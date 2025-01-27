@@ -3,38 +3,57 @@
 #include "NK/WindowLayer.h"
 #include "NK/MathLayer.h"
 #include "NK/DataStructuresLayer.h"
+#include "NK/UILayer.h"
 
 #include "Buffer.h"
+#include "Pane.h"
 #include "Editor.h"
 #include "Buffer.cpp"
+#include "Pane.cpp"
 #include "Keymaps.cpp"
-
-#include <dwrite.h>
-#include <d2d1.h>
-
-#define CheckFail(Call) do { \
-    HRESULT HResult = Call; \
-    if (FAILED(HResult)) { \
-         Print("DWrite Call Failed: 0x%x\n", HResult); NK_TRAP(); Exit(1); \
-    } \
-} while (0);
 
 enum {
     MAX_LINE_LENGTH = 256
 };
 
-global IDWriteFactory *DWriteFactory;
-global ID2D1Factory *D2DFactory;
-global ID2D1HwndRenderTarget *RenderTarget;
-global IDWriteTextFormat *TextFormat;
-
-global ID2D1SolidColorBrush *TextBrush;
-global ID2D1SolidColorBrush *TextBrushInverted;
-global ID2D1SolidColorBrush *SelectionBrush;
-
 global TextEditor Editor;
-global float LineHeight;
-global float Padding = 2;
+global EditorConfig Config;
+
+void LoadDefaultConfig() {
+    Config.EditorPadding = 2;
+    Config.StatusBarPadding = 2;
+    Config.FontSize = 16;
+    Config.TabSize = 4;
+}
+
+void UpdateConfigCalculations() {
+    IDWriteTextLayout *TextLayout;
+    CheckFail(DWriteFactory->CreateTextLayout(
+        L" ",
+        1,
+        TextFormat,
+        128.0f,
+        128.0f,
+        &TextLayout
+    ));
+
+    DWRITE_TEXT_METRICS CharMetrics;
+    TextLayout->GetMetrics(&CharMetrics);
+
+    Config.SpaceWidth = CharMetrics.widthIncludingTrailingWhitespace;
+    Config.TabWidth = Config.TabSize * CharMetrics.widthIncludingTrailingWhitespace;
+    TextFormat->SetIncrementalTabStop(Config.TabWidth);
+
+    DWRITE_LINE_METRICS LineMetrics;
+    u32 LineCount = 0;
+    TextLayout->GetLineMetrics(&LineMetrics, 1, &LineCount);
+
+    Config.LineHeight = LineMetrics.height;
+
+    Config.StatusBarHeight = LineMetrics.height + Config.StatusBarPadding * 2;
+
+    TextLayout->Release();
+}
 
 void UpdateScroll(Pane *Target) {
     GapBuffer *Buffer = &Target->Buffer;
@@ -47,8 +66,8 @@ void UpdateScroll(Pane *Target) {
         }
     }
 
-    float ContentHeight = Target->Height - Padding * 2;
-    u64 LinesVisible = IFloor(ContentHeight / LineHeight);
+    float ContentHeight = Target->Height - Config.EditorPadding * 2;
+    u64 LinesVisible = IFloor(ContentHeight / Config.LineHeight);
 
     if (CursorLine < Target->Scroll) {
         Target->Scroll = CursorLine;
@@ -65,7 +84,15 @@ void UpdateScroll(Pane *Target) {
     Target->ScrollRenderIndex = RenderIndex;
 }
 
-void DrawPane(Pane *ToDraw) {
+void DrawStatusBar(Pane *P) {
+    Vec2 Position = Vec2(P->X + Config.StatusBarPadding, P->Y + P->Height - Config.StatusBarHeight);
+    Vec2 Size = Vec2(P->Width, Config.StatusBarHeight);
+
+    DrawTextCenteredVertically(P->File, Position, Size.Y, UI_BLACK);
+}
+
+// For now, all the D2D1 stuff is defined and setup in UIWindows.cpp
+void DrawTheActualEditor(Pane *ToDraw) {
     GapBuffer *Buffer = &ToDraw->Buffer;
 
     char Line8[MAX_LINE_LENGTH];
@@ -75,10 +102,13 @@ void DrawPane(Pane *ToDraw) {
     Bounds.left = ToDraw->X;
     Bounds.top = ToDraw->Y;
     Bounds.right = ToDraw->X + ToDraw->Width;
-    Bounds.bottom = ToDraw->Y + ToDraw->Height;
-    RenderTarget->DrawRectangle(Bounds, TextBrush, 2, 0);
+    Bounds.bottom = ToDraw->Y + ToDraw->Height - Config.StatusBarHeight;
+
+    RenderTarget->PushAxisAlignedClip(Bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    RenderTarget->DrawRectangle(Bounds, Brushes[UI_BLACK], 2, 0);
 
     // Padding
+    float Padding = Config.EditorPadding;
     Bounds.left += Padding;
     Bounds.right -= Padding;
     Bounds.top += Padding;
@@ -137,7 +167,7 @@ void DrawPane(Pane *ToDraw) {
                 SelectionRect.right = Bounds.left + SelectionEndMetrics.left;
                 SelectionRect.bottom = SelectionRect.top + SelectionStartMetrics.height;
 
-                RenderTarget->FillRectangle(&SelectionRect, SelectionBrush);
+                RenderTarget->FillRectangle(&SelectionRect, Brushes[UI_LIGHT_GRAY]);
             }
         }
 
@@ -158,19 +188,23 @@ void DrawPane(Pane *ToDraw) {
 
             if (Editor.Mode != ED_INSERT) {
                 CaretBounds.right += CaretMetrics.width;
-                RenderTarget->FillRectangle(CaretBounds, TextBrush);
+                if (CaretMetrics.width == 0) {
+                    CaretBounds.right += Config.SpaceWidth;
+                }
+
+                RenderTarget->FillRectangle(CaretBounds, Brushes[UI_BLACK]);
 
                 DWRITE_TEXT_RANGE TextRange = {CursorStart, 1};
-                TextLayout->SetDrawingEffect(TextBrushInverted, TextRange);
+                TextLayout->SetDrawingEffect(Brushes[UI_WHITE], TextRange);
             } else{
-                RenderTarget->DrawRectangle(CaretBounds, TextBrush);
+                RenderTarget->DrawRectangle(CaretBounds, Brushes[UI_BLACK]);
             }
         }
 
         D2D1_POINT_2F Location;
         Location.x = Bounds.left;
         Location.y = Bounds.top;
-        RenderTarget->DrawTextLayout(Location, TextLayout, TextBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        RenderTarget->DrawTextLayout(Location, TextLayout, Brushes[UI_BLACK], D2D1_DRAW_TEXT_OPTIONS_CLIP);
 
         DWRITE_LINE_METRICS LineMetrics;
         u32 LineCount = 0;
@@ -182,6 +216,13 @@ void DrawPane(Pane *ToDraw) {
 
         TextLayout->Release();
     }
+
+    RenderTarget->PopAxisAlignedClip();
+}
+
+void DrawPane(Pane *ToDraw) {
+    DrawTheActualEditor(ToDraw);
+    DrawStatusBar(ToDraw);
 }
 
 void OnKeyPress(u32 Codepoint) {
@@ -235,31 +276,6 @@ void OnCharInput(char Char) {
     HandleShortcut(&Editor, Char, ModBits);
 }
 
-void AdjustTabWidthAndSetLineHeight() {
-    IDWriteTextLayout *TextLayout;
-    CheckFail(DWriteFactory->CreateTextLayout(
-        L" ",
-        1,
-        TextFormat,
-        128.0f,
-        128.0f,
-        &TextLayout
-    ));
-
-    DWRITE_TEXT_METRICS CharMetrics;
-    TextLayout->GetMetrics(&CharMetrics);
-
-    TextFormat->SetIncrementalTabStop(TAB_SIZE * CharMetrics.widthIncludingTrailingWhitespace);
-
-    DWRITE_LINE_METRICS LineMetrics;
-    u32 LineCount = 0;
-    TextLayout->GetLineMetrics(&LineMetrics, 1, &LineCount);
-
-    LineHeight = LineMetrics.height;
-
-    TextLayout->Release();
-}
-
 void NKMain() {
     Window MainWindow = {};
     MainWindow.Title = "Editor";
@@ -272,50 +288,23 @@ void NKMain() {
         Print("Failed to initialize window!\n");
         Exit(1);
     }
-    MaximizeWindow(&MainWindow);
-
-    CheckFail(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown **) &DWriteFactory));
-
-    D2D1_FACTORY_OPTIONS D2DFactoryOptions = {};
-    CheckFail(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), &D2DFactoryOptions, (void **)&D2DFactory));
-
-    D2D1_SIZE_U WinSize = {};
-    WinSize.width = MainWindow.Size.X;
-    WinSize.height = MainWindow.Size.Y;
-    CheckFail(D2DFactory->CreateHwndRenderTarget(
-        D2D1::RenderTargetProperties(),
-        D2D1::HwndRenderTargetProperties(MainWindow.Handle, WinSize, D2D1_PRESENT_OPTIONS_NONE),
-        &RenderTarget)
-    );
-
-    CheckFail(DWriteFactory->CreateTextFormat(
-        L"Roboto",
-        0,
-        DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        16.0f,
-        L"en-us",
-        &TextFormat
-    ));
-
-    AdjustTabWidthAndSetLineHeight();
-
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &TextBrush);
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &TextBrushInverted);
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::LightGray), &SelectionBrush);
-
-    Editor.Mode = ED_NORMAL;
+    // MaximizeWindow(&MainWindow);
 
     Arena KeymapArena = CreateArena(MegaBytes(1));
     CreateKeymaps(&KeymapArena);
 
+    LoadDefaultConfig();
+    InitUI(&MainWindow, Config.FontSize);
+    UpdateConfigCalculations(); // requires font to be set up
+
     Pane InitialPane = CreatePane(KiloBytes(16), 0, 0, MainWindow.Size.X, MainWindow.Size.Y);
 
+    Editor.Mode = ED_NORMAL;
     Editor.Panes[0] = InitialPane;
     Editor.ActivePane = &Editor.Panes[0];
+    Editor.Directory = "D:\\dev\\NK";
 
-    LoadSourceFile(&Editor.ActivePane->Buffer, "Editor/Editor.cpp");
+    PaneLoadFile(Editor.ActivePane, "Editor/Editor.cpp");
 
     double CPUTimeAverage = 0.0;
     while (MainWindow.Running) {
@@ -324,22 +313,15 @@ void NKMain() {
         UpdateWindow(&MainWindow);
 
         if (MainWindow.Resized) {
-            D2D1_SIZE_U WinSize = {};
-            WinSize.width = MainWindow.Size.X;
-            WinSize.height = MainWindow.Size.Y;
-
-            RenderTarget->Resize(WinSize);
-
-            Editor.ActivePane->Width = WinSize.width;
-            Editor.ActivePane->Height = WinSize.height;
+            Editor.ActivePane->Width = MainWindow.Size.X;
+            Editor.ActivePane->Height = MainWindow.Size.Y;
         }
 
-        RenderTarget->BeginDraw();
-        RenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
+        BeginUIFrame(&MainWindow);
 
         DrawPane(Editor.ActivePane);
 
-        RenderTarget->EndDraw();
+        EndUIFrame();
 
         u64 CPUTimeEnd = GetTimeNowUs();
         double CPUTimeDeltaMS = double(CPUTimeEnd - CPUTimeBegin) / 1000.0;
@@ -351,16 +333,9 @@ void NKMain() {
         SetWindowTitle(&MainWindow, PerfTitle);
     }
 
+    DestroyUI();
+
     FreeArena(&KeymapArena);
     DestroyPane(InitialPane);
-
-    TextFormat->Release();
-    TextBrush->Release();
-    TextBrushInverted->Release();
-    SelectionBrush->Release();
-    RenderTarget->Release();
-    DWriteFactory->Release();
-    D2DFactory->Release();
-
     DestroyWindow(&MainWindow);
 }
