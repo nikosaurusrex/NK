@@ -12,7 +12,9 @@ static LRESULT CALLBACK WindowProc(HWND Handle, UINT uMsg, WPARAM wParam, LPARAM
             return 0;
         } break;
         case WM_SIZE: {
-            Win->Resized = 1;
+            if (Win) {
+                Win->Resized = 1;
+            }
         } break;
         case WM_PAINT: {
             PAINTSTRUCT Ps = {};
@@ -81,6 +83,40 @@ static LRESULT CALLBACK WindowProc(HWND Handle, UINT uMsg, WPARAM wParam, LPARAM
             }
             Result = DefWindowProc(Handle, uMsg, wParam, lParam);
         } break;
+        case WM_NCPAINT: {
+        } break;
+        case WM_NCACTIVATE: {
+            Result = DefWindowProc(Handle, uMsg, wParam, -1);
+        } break;
+        case WM_CREATE: {
+            SetWindowPos(
+                Handle, 0,
+                0, 0, 0, 0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER
+            );
+        } break;
+        case WM_NCCALCSIZE: {
+            if (wParam) {
+                UINT DPI = GetDpiForWindow(Handle);
+
+                int FrameX = GetSystemMetricsForDpi(SM_CXFRAME, DPI);
+                int FrameY = GetSystemMetricsForDpi(SM_CYFRAME, DPI);
+                int Padding = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, DPI);
+
+                NCCALCSIZE_PARAMS *Params = (NCCALCSIZE_PARAMS *)lParam;
+                RECT *ClientRect = Params->rgrc;
+
+                ClientRect->right -= FrameX + Padding;
+                ClientRect->left += FrameX + Padding;
+                ClientRect->bottom -= FrameY + Padding;
+
+                if (Win && IsMaximized(Win)) {
+                    ClientRect->top += Padding;
+                }
+            } else {
+                Result = DefWindowProc(Handle, uMsg, wParam, lParam);
+            }
+        };
         default: {
             Result = DefWindowProc(Handle, uMsg, wParam, lParam);
         } break;
@@ -103,6 +139,8 @@ b8 InitWindow(Window *Win) {
 
     int Height = Win->Size.Y;
     if (!Height) Height = CW_USEDEFAULT;
+
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     CursorHandles[0] = LoadCursor(0, IDC_ARROW);
     CursorHandles[1] = LoadCursor(0, IDC_HAND);
@@ -160,7 +198,6 @@ b8 InitWindow(Window *Win) {
 
     // Show Window
     ShowWindow(Handle, SW_SHOW);
-    // UpdateWindow(Handle);
 
     Win->Handle = Handle;
     Win->Running = 1;
@@ -284,6 +321,18 @@ void MaximizeWindow(Window *Win) {
 
     Win->Position.X = WindowPos.x;
     Win->Position.Y = WindowPos.y;
+}
+
+b32 IsMaximized(Window *Win) {
+    b32 Result = 0;
+
+    WINDOWPLACEMENT Placement = {};
+    Placement.length = sizeof(Placement);
+    if (GetWindowPlacement(Win->Handle, &Placement)) {
+        Result = Placement.showCmd == SW_SHOWMAXIMIZED; 
+    }
+
+    return Result;
 }
 
 void SetWindowTitle(Window *Win, const char *Title) {

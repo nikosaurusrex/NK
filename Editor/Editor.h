@@ -11,9 +11,10 @@ enum {
 };
 
 struct EditorConfig {
+    NativeString FontName;
+    float FontSize;
     int StatusBarPadding;
     float EditorPadding;
-    float FontSize;
     int TabSize;
 
     // Not set by the user
@@ -21,6 +22,7 @@ struct EditorConfig {
     float TabWidth;
     float LineHeight;
     float StatusBarHeight;
+    Font EditorFont;
 };
 
 struct TextEditor {
@@ -28,5 +30,6 @@ struct TextEditor {
     Pane Panes[1];
     String Directory;
     u8 Mode;
+    b8 NeedsRedraw;
 };
 

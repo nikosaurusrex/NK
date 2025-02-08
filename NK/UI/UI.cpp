@@ -46,18 +46,6 @@ void EndUIFrame() {
     EndUIRendering();
 }
 
-void PushRectangle(UIBox Box, u32 Color, u32 Border) {
-    DrawRectangle(Box.Position, Box.Size, Color);
-}
-
-void PushText(String Text, Vec2 Position, u32 Color) {
-    DrawText(Text, Position, Color);
-}
-
-void PushTextCentered(String Text, UIBox Box, u32 Color) {
-    DrawTextCentered(Text, Box.Position, Box.Size, Color);
-}
-
 void DrawBox(UIBox Box, u32 InteractionFlags, u32 DrawFlags) {
     b32 Active = (InteractionFlags & UI_ACTIVE) && (DrawFlags & UI_DRAW_ACTIVE);
     b32 Hovered = (InteractionFlags & UI_HOVERED) && (DrawFlags & UI_DRAW_HOVERED);
@@ -71,7 +59,8 @@ void DrawBox(UIBox Box, u32 InteractionFlags, u32 DrawFlags) {
         }
     }
 
-    u32 Color = UI_BUTTON_BG;
+    u32 Color = UI_SECONDARY_BG;
+    /*
     if (Active) {
         if (Hovered) {
             Color = UI_BUTTON_ACTIVE_HOVERED_BG; 
@@ -80,9 +69,9 @@ void DrawBox(UIBox Box, u32 InteractionFlags, u32 DrawFlags) {
         }
     } else if (Hovered) {
         Color = UI_BUTTON_HOVERED_BG;
-    }
+    }*/
 
-    PushRectangle(Box, Color, Border);
+    DrawRectangle(Box.Position, Box.Size, Color);
 }
 
 b32 IsHovered(UIBox Box) {
@@ -134,8 +123,8 @@ b8 UIButton(String Text, Vec2 Position, Vec2 Size) {
     u32 RenderFlags = UI_DRAW_HOVERED | UI_DRAW_BORDER;
 
     DrawBox(Box, InteractionFlags, RenderFlags);
-    PushTextCentered(Text, Box, UI_WHITE);
-
+    DrawTextCentered(Text, Box.Position, Box.Size, UI_PRIMARY_FG);
+    
     return Result;
 }
 
@@ -149,12 +138,8 @@ b8 UIToggleButton(b8 *Value, String Text, Vec2 Position, Vec2 Size) {
     u32 RenderFlags = UI_DRAW_ACTIVE | UI_DRAW_HOVERED | UI_DRAW_BORDER;
 
     DrawBox(Box, InteractionFlags, RenderFlags);
-    PushTextCentered(Text, Box, UI_WHITE);
+    DrawTextCentered(Text, Box.Position, Box.Size, UI_PRIMARY_FG);
 
     Result = *Value;
     return Result;
-}
-
-int GetUIFontHeight() {
-    return 16;
 }

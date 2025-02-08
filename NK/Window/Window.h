@@ -63,6 +63,7 @@ void SwapBuffers(Window *Win);
 
 void ToggleFullscreen(Window *Win);
 void MaximizeWindow(Window *Win);
+b32 IsMaximized(Window *Win);
 
 void SetWindowTitle(Window *Win, const char *Title);
 

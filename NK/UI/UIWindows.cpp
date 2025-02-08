@@ -11,7 +11,7 @@
 global IDWriteFactory *DWriteFactory;
 global ID2D1Factory *D2DFactory;
 global ID2D1HwndRenderTarget *RenderTarget;
-global IDWriteTextFormat *TextFormat;
+global Font UIFont;
 
 global ID2D1SolidColorBrush *Brushes[UI_COLORS];
 
@@ -30,25 +30,16 @@ void InitUIRendering(Window *Win, float FontSize) {
         &RenderTarget)
     );
 
-    CheckFail(DWriteFactory->CreateTextFormat(
-        L"Roboto",
-        0,
-        DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        FontSize,
-        L"en-us",
-        &TextFormat
-    ));
+    UIFont = CreateFont(MakeNativeString("Roboto"), 14.0f);
 
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &Brushes[UI_BLACK]);
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &Brushes[UI_WHITE]);
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::LightGray), &Brushes[UI_LIGHT_GRAY]);
+    RenderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
 
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x161616, 1.0f), &Brushes[UI_BUTTON_BG]);
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x222222, 1.0f), &Brushes[UI_BUTTON_HOVERED_BG]);
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x292929, 1.0f), &Brushes[UI_BUTTON_ACTIVE_BG]);
-    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x353535, 1.0f), &Brushes[UI_BUTTON_ACTIVE_HOVERED_BG]);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x252829, 1.0f), &Brushes[UI_PRIMARY_BG]);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0xfafafa, 1.0f), &Brushes[UI_PRIMARY_FG]);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x202223, 1.0f), &Brushes[UI_SECONDARY_BG]);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x797a7b, 1.0f), &Brushes[UI_SECONDARY_FG]);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x181a1c, 1.0f), &Brushes[UI_BORDER]);
+    RenderTarget->CreateSolidColorBrush(D2D1::ColorF(0x363b4f, 1.0f), &Brushes[UI_SELECTION]);
 }
 
 void DeinitUIRendering() {
@@ -56,22 +47,46 @@ void DeinitUIRendering() {
         Brushes[i]->Release();
     }
 
+    DestroyFont(UIFont);
+
     RenderTarget->Release();
     DWriteFactory->Release();
     D2DFactory->Release();
 }
 
-void BeginUIRendering(Window *Win) {
-    RenderTarget->BeginDraw();
-    RenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
+Font CreateFont(NativeString Name, float Size) {
+    Font Result = {};
 
+    CheckFail(DWriteFactory->CreateTextFormat(
+        Name,
+        0,
+        DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        Size,
+        L"en-us",
+        &Result.Format
+    ));
+
+    return Result;
+}
+
+void DestroyFont(Font Handle) {
+    if (Handle.Format) {
+        Handle.Format->Release();
+    }
+}
+
+void BeginUIRendering(Window *Win) {
     if (Win->Resized) {
         D2D1_SIZE_U WinSize = {};
         WinSize.width = Win->Size.X;
         WinSize.height = Win->Size.Y;
 
-        RenderTarget->Resize(WinSize);
+        CheckFail(RenderTarget->Resize(WinSize));
     }
+
+    RenderTarget->BeginDraw();
 }
 
 void EndUIRendering() {
@@ -87,8 +102,20 @@ void DrawRectangle(Vec2 Position, Vec2 Size, u32 Color) {
     RenderTarget->FillRectangle(Rect, Brushes[Color]);
 }
 
+void DrawBorderedRectangle(Vec2 Position, Vec2 Size, u32 Color) {
+    D2D1_RECT_F Rect;
+    Rect.left = Position.X;
+    Rect.top = Position.Y;
+    Rect.right = Position.X + Size.X;
+    Rect.bottom = Position.Y + Size.Y;
+
+    RenderTarget->FillRectangle(Rect, Brushes[Color]);
+    RenderTarget->DrawRectangle(Rect, Brushes[UI_BORDER], 2);
+}
+
 void DrawText(String Text, Vec2 Position, u32 Color) {
     wchar_t WideBuffer[1024];
+    Assert(Text.Length < 1024);
     int Length16 = MultiByteToWideChar(CP_UTF8, 0, (char *) Text.Pointer, Text.Length, WideBuffer, sizeof(WideBuffer) / sizeof(wchar_t));
 
     IDWriteTextLayout *Layout = 0;
@@ -98,7 +125,7 @@ void DrawText(String Text, Vec2 Position, u32 Color) {
     CheckFail(DWriteFactory->CreateTextLayout(
         WideBuffer,
         Length16,
-        TextFormat,
+        UIFont.Format,
         MaxWidth,
         MaxHeight,
         &Layout
@@ -118,13 +145,14 @@ void DrawText(String Text, Vec2 Position, u32 Color) {
 
 void DrawTextCentered(String Text, Vec2 Position, Vec2 Size, u32 Color) {
     wchar_t WideBuffer[1024];
+    Assert(Text.Length < 1024);
     int Length16 = MultiByteToWideChar(CP_UTF8, 0, (char *) Text.Pointer, Text.Length, WideBuffer, sizeof(WideBuffer) / sizeof(wchar_t));
 
     IDWriteTextLayout *Layout = 0;
     CheckFail(DWriteFactory->CreateTextLayout(
         WideBuffer,
         Length16,
-        TextFormat,
+        UIFont.Format,
         Size.X,
         Size.Y,
         &Layout
@@ -144,6 +172,7 @@ void DrawTextCentered(String Text, Vec2 Position, Vec2 Size, u32 Color) {
 
 void DrawTextCenteredVertically(String Text, Vec2 Position, float Height, u32 Color) {
     wchar_t WideBuffer[1024];
+    Assert(Text.Length < 1024);
     int Length16 = MultiByteToWideChar(CP_UTF8, 0, (char *) Text.Pointer, Text.Length, WideBuffer, sizeof(WideBuffer) / sizeof(wchar_t));
 
     IDWriteTextLayout *Layout = 0;
@@ -151,7 +180,7 @@ void DrawTextCenteredVertically(String Text, Vec2 Position, float Height, u32 Co
     CheckFail(DWriteFactory->CreateTextLayout(
         WideBuffer,
         Length16,
-        TextFormat,
+        UIFont.Format,
         MaxWidth,
         Height,
         &Layout

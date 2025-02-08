@@ -20,18 +20,22 @@ global TextEditor Editor;
 global EditorConfig Config;
 
 void LoadDefaultConfig() {
+    Config.FontName = MakeNativeString("Consolas");
+    Config.FontSize = 14;
     Config.EditorPadding = 2;
     Config.StatusBarPadding = 2;
-    Config.FontSize = 16;
     Config.TabSize = 4;
 }
 
 void UpdateConfigCalculations() {
+    DestroyFont(Config.EditorFont);
+    Config.EditorFont = CreateFont(Config.FontName, Config.FontSize);
+
     IDWriteTextLayout *TextLayout;
     CheckFail(DWriteFactory->CreateTextLayout(
         L" ",
         1,
-        TextFormat,
+        Config.EditorFont.Format,
         128.0f,
         128.0f,
         &TextLayout
@@ -42,14 +46,13 @@ void UpdateConfigCalculations() {
 
     Config.SpaceWidth = CharMetrics.widthIncludingTrailingWhitespace;
     Config.TabWidth = Config.TabSize * CharMetrics.widthIncludingTrailingWhitespace;
-    TextFormat->SetIncrementalTabStop(Config.TabWidth);
+    Config.EditorFont.Format->SetIncrementalTabStop(Config.TabWidth);
 
     DWRITE_LINE_METRICS LineMetrics;
     u32 LineCount = 0;
     TextLayout->GetLineMetrics(&LineMetrics, 1, &LineCount);
 
     Config.LineHeight = LineMetrics.height;
-
     Config.StatusBarHeight = LineMetrics.height + Config.StatusBarPadding * 2;
 
     TextLayout->Release();
@@ -85,10 +88,11 @@ void UpdateScroll(Pane *Target) {
 }
 
 void DrawStatusBar(Pane *P) {
-    Vec2 Position = Vec2(P->X + Config.StatusBarPadding, P->Y + P->Height - Config.StatusBarHeight);
+    Vec2 Position = Vec2(P->X, P->Y + P->Height - Config.StatusBarHeight);
     Vec2 Size = Vec2(P->Width, Config.StatusBarHeight);
 
-    DrawTextCenteredVertically(P->File, Position, Size.Y, UI_BLACK);
+    DrawBorderedRectangle(Position, Size, UI_SECONDARY_BG);
+    DrawTextCenteredVertically(P->File, Position, Size.Y, UI_PRIMARY_FG);
 }
 
 // For now, all the D2D1 stuff is defined and setup in UIWindows.cpp
@@ -105,7 +109,7 @@ void DrawTheActualEditor(Pane *ToDraw) {
     Bounds.bottom = ToDraw->Y + ToDraw->Height - Config.StatusBarHeight;
 
     RenderTarget->PushAxisAlignedClip(Bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    RenderTarget->DrawRectangle(Bounds, Brushes[UI_BLACK], 2, 0);
+    RenderTarget->FillRectangle(Bounds, Brushes[UI_PRIMARY_BG]);
 
     // Padding
     float Padding = Config.EditorPadding;
@@ -130,7 +134,7 @@ void DrawTheActualEditor(Pane *ToDraw) {
         CheckFail(DWriteFactory->CreateTextLayout(
             Line16,
             Line16Length,
-            TextFormat,
+            Config.EditorFont.Format,
             Bounds.right - Bounds.left,
             Bounds.bottom - Bounds.top,
             &TextLayout
@@ -167,7 +171,7 @@ void DrawTheActualEditor(Pane *ToDraw) {
                 SelectionRect.right = Bounds.left + SelectionEndMetrics.left;
                 SelectionRect.bottom = SelectionRect.top + SelectionStartMetrics.height;
 
-                RenderTarget->FillRectangle(&SelectionRect, Brushes[UI_LIGHT_GRAY]);
+                RenderTarget->FillRectangle(&SelectionRect, Brushes[UI_SELECTION]);
             }
         }
 
@@ -192,19 +196,19 @@ void DrawTheActualEditor(Pane *ToDraw) {
                     CaretBounds.right += Config.SpaceWidth;
                 }
 
-                RenderTarget->FillRectangle(CaretBounds, Brushes[UI_BLACK]);
+                RenderTarget->FillRectangle(CaretBounds, Brushes[UI_PRIMARY_FG]);
 
                 DWRITE_TEXT_RANGE TextRange = {CursorStart, 1};
-                TextLayout->SetDrawingEffect(Brushes[UI_WHITE], TextRange);
+                TextLayout->SetDrawingEffect(Brushes[UI_PRIMARY_BG], TextRange);
             } else{
-                RenderTarget->DrawRectangle(CaretBounds, Brushes[UI_BLACK]);
+                RenderTarget->DrawRectangle(CaretBounds, Brushes[UI_PRIMARY_FG]);
             }
         }
 
         D2D1_POINT_2F Location;
         Location.x = Bounds.left;
         Location.y = Bounds.top;
-        RenderTarget->DrawTextLayout(Location, TextLayout, Brushes[UI_BLACK], D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        RenderTarget->DrawTextLayout(Location, TextLayout, Brushes[UI_PRIMARY_FG], D2D1_DRAW_TEXT_OPTIONS_CLIP);
 
         DWRITE_LINE_METRICS LineMetrics;
         u32 LineCount = 0;
@@ -254,6 +258,7 @@ void OnKeyPress(u32 Codepoint) {
     }
 
     HandleShortcut(&Editor, char(Codepoint & 0xFF), ModBits);
+    Editor.NeedsRedraw = 1;
 }
 
 void OnCharInput(char Char) {
@@ -274,6 +279,7 @@ void OnCharInput(char Char) {
     }
 
     HandleShortcut(&Editor, Char, ModBits);
+    Editor.NeedsRedraw = 1;
 }
 
 void NKMain() {
@@ -299,10 +305,11 @@ void NKMain() {
 
     Pane InitialPane = CreatePane(KiloBytes(16), 0, 0, MainWindow.Size.X, MainWindow.Size.Y);
 
-    Editor.Mode = ED_NORMAL;
     Editor.Panes[0] = InitialPane;
     Editor.ActivePane = &Editor.Panes[0];
     Editor.Directory = "D:\\dev\\NK";
+    Editor.Mode = ED_NORMAL;
+    Editor.NeedsRedraw = 1;
 
     PaneLoadFile(Editor.ActivePane, "Editor/Editor.cpp");
 
@@ -319,7 +326,10 @@ void NKMain() {
 
         BeginUIFrame(&MainWindow);
 
-        DrawPane(Editor.ActivePane);
+        // if (Editor.NeedsRedraw) {
+            DrawPane(Editor.ActivePane);
+            Editor.NeedsRedraw = 0;
+        // }
 
         EndUIFrame();
 
@@ -328,11 +338,14 @@ void NKMain() {
         
         CPUTimeAverage = CPUTimeAverage * 0.95 + CPUTimeDeltaMS * 0.05;
 
+        int FPS = 1000 / CPUTimeAverage;
+
         char PerfTitle[128];
-        stbsp_snprintf(PerfTitle, sizeof(PerfTitle), "cpu: %.2fmss", CPUTimeAverage);
+        stbsp_snprintf(PerfTitle, sizeof(PerfTitle), "cpu: %.2fmss, %d fps", CPUTimeAverage, FPS);
         SetWindowTitle(&MainWindow, PerfTitle);
     }
 
+    DestroyFont(Config.EditorFont);
     DestroyUI();
 
     FreeArena(&KeymapArena);
